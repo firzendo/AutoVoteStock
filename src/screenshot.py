@@ -7,19 +7,11 @@ import datetime
 
 from PIL import Image
 from selenium.webdriver.common.by import By
+from page_navigator import PageNavigator
 
 
-def execute_final_screenshot(driver, voting_stats, log_msg_func, vote_handler, output_dir="screenshots"):
-    """
-    投票完成後，逐一查詢各公司投票結果並截圖
+def execute_final_screenshot(driver, voting_stats, log_msg_func, vote_handler, page_navigator, output_dir="screenshots"):
 
-    Args:
-        driver: Selenium WebDriver 實例
-        voting_stats: dict 投票統計 {'total': 總數, 'voted': 已投票, 'failed': 失敗, 'has_unvoted': 是否找到未投票}
-        log_msg_func: 用於輸出log的函數
-        vote_handler: VoteHandler 實例，用於操作頁面
-        output_dir: 截圖保存目錄
-    """
     # 投票統計
     log_msg_func("\n" + "=" * 60)
     log_msg_func("【投票完成】統計結果")
@@ -32,17 +24,17 @@ def execute_final_screenshot(driver, voting_stats, log_msg_func, vote_handler, o
 
     log_msg_func("=" * 60)
 
-    # 建立截圖回調函數
-    screenshot_func = create_company_screenshot_callback(driver, log_msg_func, output_dir=output_dir)
+    # 建立截圖回調函數（傳入 page_navigator）
+    screenshot_func = create_company_screenshot_callback(driver, log_msg_func, page_navigator, output_dir=output_dir)
 
-    # 逐一查詢並截圖
-    vote_handler.screenshot_all_companies_results(log_msg_func, screenshot_func)
+    # 使用 ScreenshotHandler 進行多頁分頁截圖
+    vote_handler.screenshot_handler.screenshot_all_companies_results(log_msg_func, screenshot_func)
 
     log_msg_func("【截圖完成】所有投票結果已保存到 screenshots/ 目錄")
-    log_msg_func(f"文件名格式: 日期_名稱_代號.png")
+    # log_msg_func(f"文件名格式: 日期_名稱_代號.png")
 
 
-def create_company_screenshot_callback(driver, log_msg_func, output_dir="screenshots"):
+def create_company_screenshot_callback(driver, log_msg_func, page_navigator, output_dir="screenshots"):
     """
     創建一個公司投票結果截圖回調函數
     截圖範圍：排除頁面 header 及「報告事項」以下的內容
@@ -64,40 +56,17 @@ def create_company_screenshot_callback(driver, log_msg_func, output_dir="screens
         filename = os.path.join(output_dir, f"{timestamp}_{company_name}_{company_code}.png")
 
         try:
-            # 捲回頁面頂部
-            driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(0.5)
+            # 使用 PageNavigator 滾回頁面頂部
+            page_navigator.scroll_to_top()
 
-            # 取得頁面縮放比例（高 DPI）
-            device_pixel_ratio = driver.execute_script("return window.devicePixelRatio;") or 1
+            # 取得頁面設備像素比（高 DPI）
+            device_pixel_ratio = page_navigator.get_device_pixel_ratio()
 
             # 取得 header 底部 Y（截圖從此開始）
-            crop_top = 0
-            for selector in [
-                'div[class="c-header_pageInfo"]',
-                'header',
-                '.c-header',
-            ]:
-                try:
-                    el = driver.find_element(By.CSS_SELECTOR, selector)
-                    bottom = el.location["y"] + el.size["height"]
-                    if bottom > 0:
-                        crop_top = bottom
-                        break
-                except Exception:
-                    pass
+            crop_top = page_navigator.get_header_bottom_y()
 
             # 取得「報告事項」的頂部 Y（截圖到此結束）
-            crop_bottom = None
-            try:
-                # 找含「報告事項」文字的元素
-                els = driver.find_elements(By.XPATH, '//*[contains(text(), "報告事項")]')
-                for el in els:
-                    if el.is_displayed():
-                        crop_bottom = el.location["y"]
-                        break
-            except Exception:
-                pass
+            crop_bottom = page_navigator.get_report_item_top_y()
 
             # 全頁截圖存到記憶體
             png_bytes = driver.get_screenshot_as_png()

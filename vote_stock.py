@@ -6,6 +6,7 @@ print("啟動中，請稍待...")
 # --- 匯入 ---
 import os
 import sys
+import time
 import datetime
 import logging
 from dotenv import load_dotenv
@@ -18,7 +19,9 @@ if src_path not in sys.path:
 
 from login_handler import LoginHandler
 from vote_handler import VoteHandler
-from screenshot import execute_final_screenshot, create_company_screenshot_callback
+from screenshot_handler import ScreenshotHandler
+from page_navigator import PageNavigator
+from screenshot import execute_final_screenshot
 from selenium import webdriver
 
 # 載入.env配置
@@ -101,10 +104,26 @@ def main():
 
         # --- 步驟2：循環投票流程 ---
         log_msg("\n【步驟2】進行循環投票...")
-        vote_handler = VoteHandler(driver, screenshot_dir="screenshots")
-        screenshot_callback = create_company_screenshot_callback(driver, log_msg, output_dir="screenshots")
-        voting_stats = vote_handler.execute_voting_loop(log_msg, screenshot_func=screenshot_callback)
-        execute_final_screenshot(driver, voting_stats, log_msg, vote_handler, output_dir="screenshots")
+        
+        # 在此處統一創建所有實體
+        # 1. 創建 PageNavigator（頁面導航）
+        page_navigator = PageNavigator(driver)
+        
+        # 2. 創建 ScreenshotHandler（截圖處理）
+        screenshot_handler = ScreenshotHandler(driver, page_navigator, screenshot_dir="screenshots")
+        
+        # 3. 創建 VoteHandler（投票處理）
+        vote_handler = VoteHandler(driver, page_navigator, screenshot_handler, screenshot_dir="screenshots")
+        
+        # ⚠️  注意：execute_voting_loop 中不再進行截圖（避免 stale element reference 錯誤）
+        # 截圖將在投票完成後統一進行
+        voting_stats = vote_handler.execute_voting_loop(log_msg)
+        
+        # --- 步驟2.5：投票完成後進行統一截圖 ---
+        # 等待所有投票完成，頁面恢復穩定狀態
+        log_msg("\n✓ 所有投票已完成，準備進行截圖...")
+        time.sleep(2)
+        execute_final_screenshot(driver, voting_stats, log_msg, vote_handler, page_navigator, output_dir="screenshots")
 
         completed_successfully = True
 
