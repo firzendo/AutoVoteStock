@@ -1,24 +1,21 @@
 #!/usr/bin/env python
 # coding: utf-8
-"""
-截圖处理器 - 管理投票結果截圖和分頁導航
-"""
 import os
 import time
+import datetime
+import logging
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from page_navigator import PageNavigator
 
 
 class ScreenshotHandler:
-    """截圖和分頁處理器"""
-    
     def __init__(self, driver: webdriver.Chrome, page_navigator: PageNavigator = None, screenshot_dir: str = "screenshots"):
         self.driver = driver
         self.screenshot_dir = screenshot_dir
         self.screenshotted_companies = self._load_screenshotted_from_disk()
         # 使用傳入的 page_navigator 或創建新的
-        self.page_navigator = page_navigator if page_navigator else PageNavigator(driver)
+        self.page_navigator = page_navigator
     
     def _load_screenshotted_from_disk(self) -> set:
         codes = set()
@@ -34,7 +31,24 @@ class ScreenshotHandler:
                 code = fname_no_ext[last_idx + 1:]
                 codes.add(code)
         return codes
-    
+
+    def save_error_screenshot(self, error_id: str = "") -> str:
+        """發生錯誤時截圖並寫入 log。回傳截圖路徑（失敗時回傳空字串）"""
+        try:
+            if not os.path.exists(self.screenshot_dir):
+                os.makedirs(self.screenshot_dir)
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_id = error_id.replace(" ", "_")[:40] if error_id else "error"
+            filename = f"ERROR_{ts}_{safe_id}.png"
+            filepath = os.path.join(self.screenshot_dir, filename)
+            self.driver.save_screenshot(filepath)
+            logging.error(f"[ERROR截圖] id={safe_id} → {filepath}")
+            print(f"   📸 錯誤截圖已儲存: {filename}")
+            return filepath
+        except Exception as exc:
+            print(f"   ⚠️  錯誤截圖失敗: {exc!s:.60}")
+            return ""
+
     def screenshot_all_companies_results(self, log_msg_func, screenshot_func):
         log_msg_func("\n【步驟3】逐一查詢各公司投票結果並截圖...")
         time.sleep(2)

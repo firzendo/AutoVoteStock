@@ -2,8 +2,6 @@
 # coding: utf-8
 
 print("啟動中，請稍待...")
-
-# --- 匯入 ---
 import os
 import sys
 import time
@@ -122,7 +120,7 @@ def main():
         # --- 步驟2.5：投票完成後進行統一截圖 ---
         # 等待所有投票完成，頁面恢復穩定狀態
         log_msg("\n✓ 所有投票已完成，準備進行截圖...")
-        time.sleep(2)
+        time.sleep(2)  # 截圖前讓頁面穩定（此處保留 sleep 因為截圖不需要等待特定元素）
         execute_final_screenshot(driver, voting_stats, log_msg, vote_handler, page_navigator, output_dir="screenshots")
 
         completed_successfully = True

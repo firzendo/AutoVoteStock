@@ -1,17 +1,11 @@
 #!/usr/bin/env python
 # coding: utf-8
-"""
-頁面導航器 - 處理頁面檢測和分頁操作
-提供通用的頁面導航功能供其他模組使用
-"""
 import time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 
 class PageNavigator:
-    """頁面導航和檢測器"""
-    
     def __init__(self, driver: webdriver.Chrome):
         self.driver = driver
     
