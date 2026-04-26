@@ -11,6 +11,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
 from screenshot_handler import ScreenshotHandler
 
+logger = logging.getLogger(__name__)
 
 # ── VoteState ────────────────────────────────────────────────────
 class VoteState(Enum):
@@ -32,7 +33,7 @@ def retry(n: int = 3, delay: float = 1.0, exceptions: tuple = (Exception,)):
                 except exceptions as exc:
                     if attempt == n:
                         raise
-                    print(f"   ⚠️  [{func.__name__}] 第 {attempt} 次失敗: {exc!s:.80} — 重試中...")
+                    logger.warning("[%s] 第 %d 次失敗: %.80s — 重試中...", func.__name__, attempt, exc)
                     time.sleep(delay)
         return wrapper
     return decorator
@@ -50,21 +51,45 @@ class VoteHandler:
 
     # ── 共用工具 ─────────────────────────────────────────────────
     def _has_dom_element(self, xpath: str) -> bool:
-        """結構判斷：找到至少一個可見元素則回傳 True（取代 'xxx' in page_html）"""
+        """結構判斷：DOM 中存在至少一個匹配元素則回傳 True。
+        不呼叫 is_displayed()，避免在 while loop 裡觸發昂貴的 render check。"""
         try:
-            return any(e.is_displayed() for e in self.driver.find_elements(By.XPATH, xpath))
+            return len(self.driver.find_elements(By.XPATH, xpath)) > 0
         except Exception:
             return False
 
-    def _wait_clickable(self, xpath: str, timeout: int = 10) -> bool:
-        """等待 XPATH 元素可點擊；逾時不拋例外，回傳 False"""
+    def _wait_and_get(self, xpath: str, timeout: int = 10):
+        """等待元素可點擊並回傳該 element（同一個 instance，避免 race condition）。
+        逾時則回傳 None，不拋例外。"""
         try:
-            WebDriverWait(self.driver, timeout).until(
+            return WebDriverWait(self.driver, timeout).until(
                 EC.element_to_be_clickable((By.XPATH, xpath))
             )
-            return True
         except TimeoutException:
-            return False
+            return None
+
+    def _wait_clickable(self, xpath: str, timeout: int = 10) -> bool:
+        """等待 XPATH 元素可點擊；只需確認可點擊時使用（不需要操作 element）。
+        逾時回傳 False，不拋例外。"""
+        return self._wait_and_get(xpath, timeout) is not None
+
+    def _retry_click(self, xpath: str, timeout: int = 10, retries: int = 3) -> bool:
+        """對單一動作（點擊）做細粒度 retry：
+        wait + get + click，遇到 StaleElementReferenceException 時重試。
+        只 retry 這一個動作，不影響外層流程狀態。"""
+        for attempt in range(1, retries + 1):
+            try:
+                el = self._wait_and_get(xpath, timeout)
+                if el is None:
+                    return False
+                el.click()
+                return True
+            except StaleElementReferenceException:
+                if attempt == retries:
+                    return False
+                logger.warning("_retry_click stale (第%d次)，重試...", attempt)
+                time.sleep(0.5)
+        return False
 
     def _wait_page_ready(self, timeout: int = 10) -> None:
         """等待頁面 body 出現（輕量頁面就緒判斷）"""
@@ -76,331 +101,302 @@ class VoteHandler:
             pass
     
     # ── 董事選舉 ─────────────────────────────────────────────────
-    @retry(n=3, delay=1.5, exceptions=(StaleElementReferenceException, TimeoutException))
     def _handle_director_election(self):
+        # ⚠️  不加 @retry：此方法為 workflow，重試可能導致重複點擊已改變的 DOM
         try:
-            print("\n" + "=" * 60)
-            print("【投票流程】董事選舉 - 全部勾選 + 平均分配")
-            print("=" * 60)
+            logger.info("=" * 60)
+            logger.info("【投票流程】董事選舉 - 全部勾選 + 平均分配")
 
-            # 等待頁面就緒（取代 time.sleep(1)）
             self._wait_page_ready()
 
-            # 結構判斷：確認是董事選舉頁面（取代 "董事" in page_html）
-            if not self._has_dom_element("//*[contains(text(),'董事')]"):
-                print("   ⚠️  未檢測到董事選舉頁面")
+            # 結構判斷（. = 包含所有子節點文字，比 text() 更穩）
+            if not self._has_dom_element("//*[contains(.,'董事')]"):
+                logger.warning("未檢測到董事選舉頁面")
                 return False
 
-            print("   ✓ 檢測到董事選舉頁面")
+            logger.info("✓ 檢測到董事選舉頁面")
 
-            # 新規則：直接有「全部贊成」按鈕
+            # 直接有「全部贊成」按鈕 → 用 _retry_click 點擊（單一動作 retry）
+            _next_xpath = "//button[contains(.,'下一步')] | //a[contains(.,'下一步')]"
             agree_button = self.page_navigator.find_agree_button_for_director()
             if agree_button:
-                print("   ✓ 已點擊『全部贊成』按鈕，準備進入下一步...")
-                # 等待下一步按鈕可點擊（取代 time.sleep(2)）
-                self._wait_clickable("//button[contains(text(),'下一步')] | //a[contains(text(),'下一步')]")
-                try:
-                    code, msg = self.page_navigator.click_next_step()
-                    if code == 0:
-                        print("   ✓ 已點擊下一步，董事選舉完成，進入下一個議案")
-                        self._wait_page_ready()     # 取代 time.sleep(2)
-                        return True
-                    else:
-                        print(f"   ⚠️  點擊下一步失敗: {msg}")
-                        return True
-                except Exception as e:
-                    print(f"   ⚠️  無法點擊下一步: {str(e)[:50]}")
+                logger.info("✓ 已點擊『全部贊成』按鈕，準備進入下一步...")
+                # _retry_click：wait + get + click 原子操作，避免 stale race condition
+                if self._retry_click(_next_xpath):
+                    logger.info("✓ 已點擊下一步，董事選舉完成，進入下一個議案")
+                    self._wait_page_ready()
+                    return True
+                else:
+                    logger.warning("下一步按鈕未出現或點擊失敗")
                     return True
 
             # 步驟1: 全部勾選複選框
             if self.page_navigator.check_all_directors():
-                print("   ✓ 已全部勾選")
+                logger.info("✓ 已全部勾選")
             else:
-                print("   ⚠️  未能成功全部勾選，等待用戶手動勾選...")
+                logger.warning("未能成功全部勾選，等待用戶手動勾選...")
                 input("\n⏳ 請手動勾選所有董事，然後按 Enter 繼續...\n")
 
-            # 等待平均分配按鈕可點擊（取代 time.sleep(3)）
-            print("   ⏳ 等待勾選狀態確認...")
-            self._wait_clickable("//*[contains(text(),'平均分配')]")
+            # 等待平均分配按鈕（只做 guard，click 由 page_navigator 負責）
+            logger.info("⏳ 等待勾選狀態確認...")
+            self._wait_clickable("//*[contains(.,'平均分配')]")
 
             # 步驟2: 平均分配
-            print("\n   準備點擊平均分配按鈕...")
+            logger.info("準備點擊平均分配按鈕...")
+            self.screenshot_handler.capture("before_director_agree_next")
             if self.page_navigator.click_average_distribution():
-                print("   ✓ 已點擊平均分配")
+                logger.info("✓ 已點擊平均分配")
             else:
-                print("   ⚠️  未能點擊平均分配，等待用戶手動操作...")
+                logger.warning("未能點擊平均分配，等待用戶手動操作...")
                 input("\n⏳ 請手動點擊平均分配，然後按 Enter 繼續...\n")
 
-            # 等待下一步按鈕可點擊（取代 time.sleep(2)）
-            self._wait_clickable("//button[contains(text(),'下一步')] | //a[contains(text(),'下一步')]")
+            # 步驟3: 用 _retry_click 點擊下一步（單一動作 retry）
+            logger.info("⏳ 等待新頁面加載...")
+            self.screenshot_handler.capture("before_director_next_step")
+            if self._retry_click(_next_xpath):
+                logger.info("✓ 已點擊下一步")
+                self._wait_page_ready()
 
-            # 步驟3: 點擊下一步
-            try:
-                code, msg = self.page_navigator.click_next_step()
-                if code == 0:
-                    print("   ✓ 已點擊下一步")
-                    # 等待新頁面就緒（取代 time.sleep(2) + time.sleep(2)）
-                    print("\n   ⏳ 等待新頁面加載...")
-                    self._wait_page_ready()
-
-                    # 結構判斷：是否還有投票選項（取代字串搜尋）
-                    _vote_xpath = (
-                        "//button[contains(text(),'全部贊成')] | //a[contains(text(),'全部贊成')]"
-                        " | //button[contains(text(),'全部反對')] | //button[contains(text(),'全部棄權')]"
-                    )
-                    if self._has_dom_element(_vote_xpath):
-                        print("   ✓ 檢測到更多投票項目，繼續處理")
-                    return True
-                else:
-                    print("   ⚠️  無法點擊下一步，等待用戶手動操作...")
-                    input("\n⏳ 請手動點擊下一步，然後按 Enter 繼續...\n")
-                    return True
-            except Exception as e:
-                print(f"   ❌ 點擊下一步失敗: {str(e)[:50]}")
+                # 結構判斷：是否還有投票選項
+                _vote_xpath = (
+                    "//button[contains(.,'全部贊成')] | //a[contains(.,'全部贊成')]"
+                    " | //button[contains(.,'全部反對')] | //button[contains(.,'全部棄權')]"
+                )
+                if self._has_dom_element(_vote_xpath):
+                    logger.info("✓ 檢測到更多投票項目，繼續處理")
+                return True
+            else:
+                logger.warning("無法點擊下一步，等待用戶手動操作...")
+                input("\n⏳ 請手動點擊下一步，然後按 Enter 繼續...\n")
                 return True
 
         except Exception as e:
-            print(f"   ❌ 處理董事選舉時出錯: {str(e)}")
+            logger.exception("處理董事選舉時出錯")
             self.screenshot_handler.save_error_screenshot("director_election_error")
             return False
 
+    # ── FSM 狀態處理器 ────────────────────────────────────────────
+    # XPath 常數（. = 包含所有子節點文字，比 text() 更穩健）
+    _XPATH_VOTE_OPTS = (
+        "//button[contains(.,'全部贊成')] | //a[contains(.,'全部贊成')]"
+        " | //button[contains(.,'全部反對')] | //button[contains(.,'全部棄權')]"
+    )
+    _XPATH_NEXT      = "//button[contains(.,'下一步')] | //a[contains(.,'下一步')]"
+    _XPATH_CONFIRM   = "//*[contains(.,'投票內容確認')] | //*[contains(.,'投票結果')]"
+    _XPATH_DIRECTOR  = "//*[contains(.,'董事')]"
+    _XPATH_SUBMIT    = "//button[contains(.,'提交')] | //button[contains(.,'確認')]"
+
+    def _detect_state(self) -> VoteState:
+        """依 DOM 結構決定目前應處於哪個 VoteState"""
+        if self._has_dom_element(self._XPATH_CONFIRM):
+            return VoteState.CONFIRM
+        if self._has_dom_element(self._XPATH_DIRECTOR):
+            return VoteState.VOTING   # 董事選舉也屬 VOTING
+        if self._has_dom_element(self._XPATH_VOTE_OPTS):
+            return VoteState.VOTING
+        if self._has_dom_element(self._XPATH_SUBMIT):
+            return VoteState.CONFIRM
+        return VoteState.DONE         # 無可操作元素 → 視為已完成
+
+    def _handle_state_confirm(self) -> dict:
+        logger.info("✓ 確認/結果頁面 → 投票完成")
+        self.screenshot_handler.capture("state_confirm")
+        return {'total': 1, 'voted': 1, 'failed': 0}
+
+    def _handle_state_voting(self, page_text: str) -> dict | None:
+        """回傳 dict 表示流程結束；回傳 None 表示繼續迴圈"""
+        # 董事選舉子流程
+        if self._has_dom_element(self._XPATH_DIRECTOR):
+            logger.info("✓ 檢測到董事選舉頁面")
+            if self._handle_director_election():
+                logger.info("✓ 董事選舉完成，繼續下一議案...")
+                self._wait_page_ready()
+                return None   # continue loop
+            else:
+                logger.warning("董事選舉處理失敗")
+                return {'total': 1, 'voted': 1, 'failed': 0}
+
+        # 標準投票：_retry_click 做單一動作 retry（wait+get+click 原子）
+        if self._has_dom_element(self._XPATH_VOTE_OPTS):
+            logger.info("✓ 標準投票選項")
+            self.screenshot_handler.capture("before_agree")
+            try:
+                code, msg = self.page_navigator.click_all_agree()
+                if code == 0:
+                    logger.info("✓ %s", msg)
+            except Exception as e:
+                logger.warning("無法自動點擊全部贊成: %s", str(e)[:50])
+                input("\n按 Enter 鍵繼續...\n")
+
+            # 用 _retry_click 點「下一步」（單一動作細粒度 retry，不重跑整個 workflow）
+            self.screenshot_handler.capture("before_next_step")
+            clicked = self._retry_click(self._XPATH_NEXT, timeout=5)
+            if clicked:
+                logger.info("✓ 已點擊下一步")
+                self._wait_page_ready()
+                return None   # continue loop — 下次迴圈 _detect_state 判斷新狀態
+            else:
+                logger.warning("無法自動點擊下一步")
+                if "完成" in page_text or "提交成功" in page_text:
+                    return {'total': 1, 'voted': 1, 'failed': 0}
+                input("\n按 Enter 鍵繼續...\n")
+                return None
+
+        return None   # 無動作，讓迴圈繼續偵測
+
+    def _handle_state_done(self, page_text: str) -> dict:
+        """無可辨識操作元素時的終態處理"""
+        submit_btns = self.driver.find_elements(By.XPATH, self._XPATH_SUBMIT)
+        if submit_btns and any(b.is_displayed() for b in submit_btns):
+            logger.info("✓ 發現提交/確認按鈕，投票完成")
+            return {'total': 1, 'voted': 1, 'failed': 0}
+
+        if self._has_dom_element(self._XPATH_NEXT):
+            logger.info("ℹ️  還有『下一步』，嘗試點擊...")
+            if self._retry_click(self._XPATH_NEXT):
+                self._wait_page_ready()
+                return None   # type: ignore  # 讓呼叫方 continue loop
+
+        logger.debug("頁面內容片段: %s", page_text[:200])
+        logger.info("✓ 投票流程完成")
+        return {'total': 1, 'voted': 1, 'failed': 0}
+
     # ── 快速投票（主流程）────────────────────────────────────────
-    @retry(n=3, delay=1.5, exceptions=(StaleElementReferenceException, TimeoutException))
+    # ⚠️  不加 @retry：此方法為 workflow，重試可能對已改變的 DOM 產生重複操作
     def _vote_with_agree_button(self):
         try:
-            print("\n" + "=" * 60)
-            print("【投票流程】快速投票")
-            print("=" * 60)
+            logger.info("=" * 60)
+            logger.info("【投票流程】快速投票")
 
-            state = VoteState.VOTING
+            # 等待任意操作元素出現後再進入迴圈
+            _any_elem = f"{self._XPATH_VOTE_OPTS} | {self._XPATH_NEXT} | {self._XPATH_DIRECTOR}"
+            self._wait_clickable(_any_elem, timeout=10)
 
-            # 等待投票頁面出現任何操作元素（取代 time.sleep(3)）
-            _any_vote_elem = (
-                "//button[contains(text(),'全部贊成')] | //a[contains(text(),'全部贊成')]"
-                " | //button[contains(text(),'下一步')] | //*[contains(text(),'董事')]"
-            )
-            self._wait_clickable(_any_vote_elem, timeout=10)
-
-            # 診斷：如果還在列表頁面，等待跳轉（取代 time.sleep(3)）
-            if (self._has_dom_element("//*[contains(text(),'未投票')]")
-                    and self._has_dom_element("//*[contains(text(),'投票狀況')]")
-                    and not self._has_dom_element("//button[contains(text(),'全部贊成')] | //a[contains(text(),'全部贊成')]")):
-                print("   ⚠️  似乎還在列表頁面，等待跳轉...")
-                self._wait_clickable("//button[contains(text(),'全部贊成')] | //a[contains(text(),'全部贊成')]", timeout=10)
+            # 診斷：還在列表頁，等待跳轉
+            if (self._has_dom_element("//*[contains(.,'未投票')]")
+                    and self._has_dom_element("//*[contains(.,'投票狀況')]")
+                    and not self._has_dom_element(self._XPATH_VOTE_OPTS)):
+                logger.warning("似乎還在列表頁面，等待跳轉...")
+                self._wait_clickable(self._XPATH_VOTE_OPTS, timeout=10)
 
             iteration    = 0
             max_iter     = 10
             last_page_text = ""
             repeat_count   = 0
 
+            # ── FSM dispatch table ─────────────────────────────────
+            _dispatch = {
+                VoteState.CONFIRM: lambda pt: self._handle_state_confirm(),
+                VoteState.VOTING:  lambda pt: self._handle_state_voting(pt),
+                VoteState.DONE:    lambda pt: self._handle_state_done(pt),
+            }
+
             while iteration < max_iter:
                 iteration += 1
-                print(f"\n【投票流程 - 循環 {iteration}】(state={state.value})")
-
-                # 輕量等待（取代 time.sleep(1)）
                 self._wait_page_ready(timeout=5)
-
                 page_text = self.driver.find_element(By.TAG_NAME, 'body').text
-                print(f"   □ 頁面文字長度: {len(page_text)} 字符")
 
-                # ── 結構判斷（取代所有 "xxx" in page_html）──────────
-                _vote_opts_xpath = (
-                    "//button[contains(text(),'全部贊成')] | //a[contains(text(),'全部贊成')]"
-                    " | //button[contains(text(),'全部反對')] | //button[contains(text(),'全部棄權')]"
-                )
-                has_confirm   = self._has_dom_element(
-                    "//*[contains(text(),'投票內容確認')] | //*[contains(text(),'投票結果')]")
-                has_director  = self._has_dom_element("//*[contains(text(),'董事')]")
-                has_vote_opts = self._has_dom_element(_vote_opts_xpath)
-                has_next_step = self._has_dom_element(
-                    "//button[contains(text(),'下一步')] | //a[contains(text(),'下一步')]")
+                logger.info("【投票流程 - 循環 %d】(state檢測中...)", iteration)
+                logger.debug("頁面文字長度: %d 字符", len(page_text))
 
-                if has_vote_opts:  print("   ✓ 頁面包含投票選項")
-                if has_director:   print("   ✓ 頁面包含『董事』")
-                if has_next_step:  print("   ✓ 頁面包含『下一步』")
-
-                # ── 重複頁面偵測 ───────────────────────────────────
+                # 重複頁面偵測
                 if last_page_text and page_text[:100] == last_page_text[:100] and len(page_text) == len(last_page_text):
                     repeat_count += 1
-                    print(f"   ⚠️  偵測到重複頁面 (第 {repeat_count} 次)")
+                    logger.warning("偵測到重複頁面 (第 %d 次)", repeat_count)
                     if repeat_count >= 3:
-                        print("   ⚠️  重複頁面過多，跳出避免無限迴圈")
-                        state = VoteState.DONE
+                        logger.warning("重複頁面過多，跳出迴圈")
                         return {'total': 1, 'voted': 1, 'failed': 0}
                 else:
                     repeat_count = 0
                 last_page_text = page_text
 
-                # ════════════════ 狀態機 ════════════════════════════
+                # 偵測狀態 → dispatch
+                state = self._detect_state()
+                logger.info("→ state=%s", state.value)
+                self.screenshot_handler.capture(f"state_{state.value}_iter{iteration}")
 
-                # 優先1: 確認/結果頁面 → DONE
-                if has_confirm:
-                    print("   ✓ 檢測到確認/結果頁面 → 投票完成")
-                    state = VoteState.DONE
+                handler = _dispatch.get(state)
+                if handler is None:
+                    logger.info("✓ 投票流程完成（無 handler）")
                     return {'total': 1, 'voted': 1, 'failed': 0}
 
-                # 優先2: 董事選舉（非確認頁）
-                if has_director and not has_confirm:
-                    print("   ✓ 檢測到董事選舉頁面（投票操作）")
-                    state = VoteState.VOTING
-                    if self._handle_director_election():
-                        print("   ✓ 董事選舉已完成，繼續下一議案...")
-                        self._wait_page_ready()     # 取代 time.sleep(2)
-                        continue
-                    else:
-                        print("   ⚠️  董事選舉處理失敗")
-                        state = VoteState.DONE
-                        return {'total': 1, 'voted': 1, 'failed': 0}
+                result = handler(page_text)
+                if result is not None:
+                    return result
+                # result is None → continue loop
 
-                # 優先3: 標準投票選項
-                if has_vote_opts:
-                    print("   ✓ 檢測到標準投票選項")
-                    state = VoteState.VOTING
-                    try:
-                        code, msg = self.page_navigator.click_all_agree()
-                        if code == 0:
-                            print(f"   ✓ {msg}")
-                    except Exception as e:
-                        print(f"   ⚠️  無法自動點擊全部贊成: {str(e)[:50]}")
-                        input("\n按 Enter 鍵繼續...\n")
-
-                    # 等待下一步按鈕可點擊（取代 time.sleep(1)）
-                    self._wait_clickable(
-                        "//button[contains(text(),'下一步')] | //a[contains(text(),'下一步')]",
-                        timeout=5)
-
-                    try:
-                        code, msg = self.page_navigator.click_next_step()
-                        if code == 0:
-                            print("   ✓ 已點擊下一步")
-                            state = VoteState.CONFIRM
-                            self._wait_page_ready()     # 取代 time.sleep(2)
-                            # 結構判斷：還有更多投票項目？
-                            if self._has_dom_element("//*[contains(text(),'董事')]") or self._has_dom_element(_vote_opts_xpath):
-                                print("   ℹ️  還有更多投票項目，繼續...")
-                                state = VoteState.VOTING
-                                continue
-                            else:
-                                print("   ✓ 所有投票項目已完成")
-                                state = VoteState.DONE
-                                return {'total': 1, 'voted': 1, 'failed': 0}
-                    except Exception as e:
-                        print(f"   ⚠️  無法自動點擊下一步: {str(e)[:50]}")
-                        if "完成" in page_text or "提交成功" in page_text:
-                            state = VoteState.DONE
-                            return {'total': 1, 'voted': 1, 'failed': 0}
-                        input("\n按 Enter 鍵繼續...\n")
-                        continue
-
-                else:
-                    # 沒有投票選項，檢查提交/下一步
-                    print("   ℹ️  未檢測到投票選項")
-                    submit_btns = self.driver.find_elements(
-                        By.XPATH, '//button[contains(text(), "提交")] | //button[contains(text(), "確認")]')
-                    if submit_btns and any(b.is_displayed() for b in submit_btns):
-                        print("   ✓ 發現提交/確認按鈕，投票完成")
-                        state = VoteState.DONE
-                        return {'total': 1, 'voted': 1, 'failed': 0}
-
-                    if has_next_step:
-                        print("   ℹ️  還有『下一步』按鈕")
-                        try:
-                            code, msg = self.page_navigator.click_next_step()
-                            if code == 0:
-                                self._wait_page_ready()
-                                continue
-                        except Exception as e:
-                            print(f"   ⚠️  點擊下一步失敗: {str(e)[:50]}")
-
-                    print(f"   📄 頁面內容片段: {page_text[:200]}")
-                    print("   ✓ 投票流程完成")
-                    state = VoteState.DONE
-                    return {'total': 1, 'voted': 1, 'failed': 0}
-
-            print("⚠️  超過最大循環次數，投票流程終止")
+            logger.warning("超過最大循環次數，投票流程終止")
             return {'total': 1, 'voted': 1, 'failed': 0}
 
         except Exception as e:
-            print(f"❌ 投票流程錯誤: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
+            logger.exception("投票流程錯誤")
             self.screenshot_handler.save_error_screenshot("vote_with_agree_error")
             return {'total': 0, 'voted': 0, 'failed': 0}
     
     def _find_and_vote_all(self):
         try:
-            print("\n" + "=" * 60)
-            print("【投票流程】搜尋未投票的議案")
-            print("=" * 60)
-            
+            logger.info("=" * 60)
+            logger.info("【投票流程】搜尋未投票的議案")
+
             time.sleep(2)
-            
-            # 尋找未投票的議案行
+
             unvoted_items = self.page_navigator.find_unvoted_items()
-            
+
             if not unvoted_items:
-                print("❌ 未找到任何未投票的議案")
+                logger.error("未找到任何未投票的議案")
                 return {'total': 0, 'voted': 0, 'failed': 0}
-            
+
             self.total_count = len(unvoted_items)
-            print(f"\n🔍 找到 {self.total_count} 個未投票的議案")
-            
-            # 逐個投票
+            logger.info("🔍 找到 %d 個未投票的議案", self.total_count)
+
             for idx, item in enumerate(unvoted_items, 1):
-                print(f"\n【議案 {idx}/{self.total_count}】")
+                logger.info("【議案 %d/%d】", idx, self.total_count)
                 if self._vote_item(item, idx):
                     self.voted_count += 1
                 time.sleep(0.5)
-            
-            # 統計結果
+
             result = {
                 'total': self.total_count,
                 'voted': self.voted_count,
                 'failed': self.total_count - self.voted_count
             }
-            
-            print("\n" + "=" * 60)
-            print("【投票完成】統計結果")
-            print(f"  總計: {result['total']} 個議案")
-            print(f"  ✓ 已投票: {result['voted']} 個")
-            print(f"  ✗ 失敗: {result['failed']} 個")
-            print("=" * 60 + "\n")
-            
+
+            logger.info("=" * 60)
+            logger.info("【投票完成】總計: %d 個議案，已投票: %d 個，失敗: %d 個",
+                        result['total'], result['voted'], result['failed'])
             return result
-        
+
         except Exception as e:
-            print(f"\n❌ 投票流程錯誤: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
+            logger.exception("投票流程錯誤")
             return {'total': 0, 'voted': 0, 'failed': 0}
     
     def _vote_item(self, item, item_index):
         try:
             agree_button = self.page_navigator.find_agree_option(item)
-            
+
             if agree_button:
                 if agree_button.get_attribute('type') == 'radio':
                     if not agree_button.is_selected():
                         self.driver.execute_script("arguments[0].click();", agree_button)
                         time.sleep(0.5)
                         if agree_button.is_selected():
-                            print(f"   ✓ 已選擇「同意」")
+                            logger.info("✓ 已選擇「同意」")
                             return True
                 else:
                     self.driver.execute_script("arguments[0].click();", agree_button)
                     time.sleep(0.5)
-                    print(f"   ✓ 已點擊「同意」按鈕")
+                    logger.info("✓ 已點擊「同意」按鈕")
                     return True
-            
+
             if self._vote_item_fallback(item):
-                print(f"   ✓ 已選擇「同意」")
+                logger.info("✓ 已選擇「同意」")
                 return True
-            
-            print(f"   ❌ 無法投票")
+
+            logger.error("無法投票 (item_index=%d)", item_index)
             return False
-        
+
         except Exception as e:
-            print(f"❌ 投票失敗 (代碼:105): {str(e)}")
+            logger.error("投票失敗 (代碼:105): %s", str(e))
             return False
     
     def _go_back_to_list(self):
@@ -456,13 +452,12 @@ class VoteHandler:
             
             # 在當前公司行中查找和點擊投票按鈕
             try:
-                vote_button = company_row.find_element(By.XPATH, './/a[contains(text(), "投票")] | .//button[contains(text(), "投票")]')
+                vote_button = company_row.find_element(By.XPATH, './/a[contains(.,"投票")] | .//button[contains(.,"投票")]')
                 log_msg_func(f"【投票流程】點擊投票按鈕 (代碼: {company_code})")
                 vote_button.click()
-                # 等待投票頁面任何操作元素出現（取代 time.sleep(3)）
+                # 等待投票頁面任何操作元素出現
                 self._wait_clickable(
-                    "//button[contains(text(),'全部贊成')] | //a[contains(text(),'全部贊成')]"
-                    " | //button[contains(text(),'下一步')] | //*[contains(text(),'董事')]",
+                    f"{self._XPATH_VOTE_OPTS} | {self._XPATH_NEXT} | {self._XPATH_DIRECTOR}",
                     timeout=10)
                 log_msg_func("✓ 已點擊投票按鈕")
             except Exception as e:
@@ -486,17 +481,18 @@ class VoteHandler:
             if vote_result.get('total', 0) > 0:
                 log_msg_func("✓ 提交投票...")
                 try:
+                    self.screenshot_handler.capture(f"before_submit_{company_code}")
                     code, msg = self.page_navigator.submit_vote()
                     # 等待確認按鈕（取代 time.sleep(1)）
                     self._wait_clickable(
-                        "//button[contains(text(),'確認')] | //a[contains(text(),'確認')]",
+                        "//button[contains(.,'確認')] | //a[contains(.,'確認')]",
                         timeout=5)
                     
                     # 點擊確認按鈕就會自動返回投票列表
                     code, msg = self.page_navigator.click_query_button()
-                    # 等待列表頁面刷新（取代 time.sleep(3)）
+                    # 等待列表頁面刷新
                     self._wait_clickable(
-                        "//*[contains(text(),'未投票')] | //*[contains(text(),'已投票')]",
+                        "//*[contains(.,'未投票')] | //*[contains(.,'已投票')]",
                         timeout=10)
                     
                     log_msg_func("✓ 投票完成，準備掃描下一個公司...")

@@ -7,6 +7,7 @@
 
 import os
 from dotenv import load_dotenv
+import logging
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
@@ -15,6 +16,9 @@ import time
 
 # 載入.env配置
 load_dotenv()
+
+
+logger = logging.getLogger(__name__)
 
 class LoginHandler:
     """登入處理器"""
@@ -54,50 +58,50 @@ class LoginHandler:
         
         # 導向至登入頁面
         if self.login_url:
-            print(f"正在導入登入頁面: {self.login_url}")
+            logger.info("正在導入登入頁面: %s", self.login_url)
             self.driver.get(self.login_url)
             time.sleep(3)
         
         # 尋找身份證字號輸入框
         code, result = self._find_id_input_field()
         if code != 0:
-            print("\n❌ 無法自動找到輸入框")
-            print("\n👉 手動操作模式已啟動")
-            print("   請在瀏覽器中手動進行以下操作:")
-            print("   1. 輸入身份證號")
-            print("   2. 選擇憑證種類: 券商網路")
-            print("   3. 點擊登入按鈕")
-            print("\n定位元素提示:")
-            print("   - 打開開發者工具 (F12)")
-            print("   - 檢查身份證輸入框的屬性 (id, name, placeholder)")
-            print("   - 或在下方輸入框找到元素說明\n")
+            logger.error("❌ 無法自動找到輸入框")
+            logger.info("👉 手動操作模式已啟動")
+            logger.info("請在瀏覽器中手動進行以下操作:")
+            logger.info("1. 輸入身份證號")
+            logger.info("2. 選擇憑證種類: 券商網路")
+            logger.info("3. 點擊登入按鈕")
+            logger.info("定位元素提示:")
+            logger.info("- 打開開發者工具 (F12)")
+            logger.info("- 檢查身份證輸入框的屬性 (id, name, placeholder)")
+            logger.info("- 或在下方輸入框找到元素說明")
             input("🔔 請完成登入，然後按 Enter 鍵繼續...\n")
             return (0, "手動登入完成")
         
         id_input = result
         id_input.clear()
         id_input.send_keys(self.id_number)
-        print(f"✓ 已輸入身份證字號: {self.id_number[:4]}****")
+        logger.info("✓ 已輸入身份證字號: %s****", self.id_number[:4])
         
         # 選擇憑證種類
         if self.cert_type:
             code, msg = self._select_cert_type()
             if code == 0:
-                print(f"✓ 已選擇憑證種類: {self.cert_type}")
+                logger.info("✓ 已選擇憑證種類: %s", self.cert_type)
             else:
-                print(f"⚠️  無法自動選擇憑證種類")
+                logger.warning("⚠️  無法自動選擇憑證種類")
         
         # 嘗試找到並點擊登入/確認按鈕
         code, msg = self._click_login_button()
         if code == 0:
-            print("✓ 已點擊登入按鈕")
+            logger.info("✓ 已點擊登入按鈕")
             time.sleep(2)
         
         # 處理登入後可能出現的權限請求對話框
-        print("\n🔍 檢查是否有權限請求對話框...")
+        logger.info("🔍 檢查是否有權限請求對話框...")
         code, msg = self._handle_permission_dialog()
         if code == 0:
-            print(f"✓ {msg}")
+            logger.info("✓ %s", msg)
             time.sleep(2)
         
         return (0, "登入流程完成")
@@ -154,24 +158,24 @@ class LoginHandler:
                 for button in buttons:
                     if button.is_displayed():
                         button_text = button.text.strip() or button.get_attribute('title') or "按鈕"
-                        print(f"   📍 找到權限按鈕: {button_text}")
+                        logger.info("📍 找到權限按鈕: %s", button_text)
                         try:
                             button.click()
-                            print(f"   ✓ 已點擊權限允許按鈕")
+                            logger.info("✓ 已點擊權限允許按鈕")
                             return (0, "已處理權限請求")
                         except Exception as e:
                             # 嘗試 JavaScript 點擊
-                            print(f"   ⚠️  直接點擊失敗，嘗試 JavaScript...")
+                            logger.warning("⚠️  直接點擊失敗，嘗試 JavaScript...")
                             self.driver.execute_script("arguments[0].click();", button)
-                            print(f"   ✓ 已使用 JavaScript 點擊權限按鈕")
+                            logger.info("✓ 已使用 JavaScript 點擊權限按鈕")
                             return (0, "已使用 JavaScript 處理權限請求")
             
             # 如果沒有找到按鈕，不視為錯誤
-            print("   ℹ️  未發現權限請求對話框（正常）")
+            logger.info("ℹ️  未發現權限請求對話框（正常）")
             return (0, "無權限對話框")
         
         except Exception as e:
-            print(f"   ⚠️  處理權限對話框時出錯: {str(e)[:50]}")
+            logger.warning("⚠️  處理權限對話框時出錯: %s", str(e)[:50])
             return (0, "權限對話框處理完畢")
     
     def _select_cert_type(self):
@@ -181,7 +185,7 @@ class LoginHandler:
         Returns:
             tuple: (code, msg) - 0成功，-202為錯誤
         """
-        print(f"\n🔍 正在尋找憑證種類選擇器（目標: {self.cert_type}）...")
+        logger.info("🔍 正在尋找憑證種類選擇器（目標: %s）...", self.cert_type)
         time.sleep(1)
         
         # 方式1：Radio buttons
@@ -191,7 +195,7 @@ class LoginHandler:
                 radio.click()
                 time.sleep(0.3)
                 if radio.is_selected():
-                    print(f"   ✓ 已選擇")
+                    logger.info("✓ 已選擇")
                     return (0, "已選擇憑證")
         
         # 方式2：Select dropdown
@@ -202,7 +206,7 @@ class LoginHandler:
                 for option in select.options:
                     if self.cert_type in option.text or option.text in self.cert_type:
                         option.click()
-                        print(f"   ✓ 已選擇: {option.text}")
+                        logger.info("✓ 已選擇: %s", option.text)
                         return (0, f"已選擇: {option.text}")
         
         # 方式3：Buttons
@@ -210,7 +214,7 @@ class LoginHandler:
         for button in buttons:
             if button.is_displayed():
                 button.click()
-                print(f"   ✓ 已點擊按鈕")
+                logger.info("✓ 已點擊按鈕")
                 return (0, "已點擊憑證按鈕")
         
         raise Exception("無法自動選擇憑證種類")
@@ -224,21 +228,21 @@ class LoginHandler:
         """
         # 尋找 iframe
         iframes = self.driver.find_elements(By.TAG_NAME, 'iframe')
-        print(f"🔍 發現 {len(iframes)} 個 iframe")
+        logger.info("🔍 發現 %s 個 iframe", len(iframes))
         
         for idx, iframe in enumerate(iframes):
             self.driver.switch_to.frame(iframe)
             code, element = self._search_input_in_current_frame()
             if code == 0:
-                print(f"   ✓ 在 iframe [{idx}] 中找到輸入框")
+                logger.info("✓ 在 iframe [%s] 中找到輸入框", idx)
                 return (0, element)
             self.driver.switch_to.default_content()
         
         # 在主頁面中尋找
-        print("🔍 在主頁面中尋找輸入框...")
+        logger.info("🔍 在主頁面中尋找輸入框...")
         code, element = self._search_input_in_current_frame()
         if code == 0:
-            print("   ✓ 在主頁面中找到輸入框")
+            logger.info("✓ 在主頁面中找到輸入框")
             return (0, element)
         
         raise Exception("無法找到身份證輸入框")
@@ -262,7 +266,7 @@ class LoginHandler:
             elements = self.driver.find_elements(by, value)
             for elem in elements:
                 if elem.is_displayed():
-                    print(f"   ✓ 找到輸入框")
+                    logger.info("✓ 找到輸入框")
                     return (0, elem)
         
         return (-1, "未找到輸入框")
@@ -277,18 +281,18 @@ class LoginHandler:
         time.sleep(2)
         
         current_url = self.driver.current_url
-        print(f"當前頁面URL: {current_url}")
+        logger.info("當前頁面URL: %s", current_url)
         
         if "login" not in current_url.lower():
-            print("✓ 已離開登入頁面")
+            logger.info("✓ 已離開登入頁面")
             return (0, "登入成功")
         
         error_elements = self.driver.find_elements(By.CSS_SELECTOR, ".alert-danger, .error")
         if error_elements:
-            print(f"❌ 登入失敗: {error_elements[0].text[:50]}")
+            logger.error("❌ 登入失敗: %s", error_elements[0].text[:50])
             raise Exception(f"登入失敗: {error_elements[0].text[:50]}")
         
-        print("⚠️  無法確定登入狀態")
+        logger.warning("⚠️  無法確定登入狀態")
         return (0, "登入狀態未知，繼續進行")
     
     def execute_login_flow(self, log_msg_func):

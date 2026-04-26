@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 # coding: utf-8
+import logging
 import time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 
 class PageNavigator:
+    _logger = logging.getLogger(__name__)
+
     def __init__(self, driver: webdriver.Chrome):
         self.driver = driver
     
     def go_to_first_page(self) -> bool:
-        print("\n📄 嘗試返回到第一頁...")
+        self._logger.info("📄 嘗試返回到第一頁...")
         time.sleep(1)
         
         # 尋找第一頁按鈕的多種可能選擇器
@@ -45,7 +48,7 @@ class PageNavigator:
                         
                         # 如果是 <strong> 標籤表示當前已在第一頁
                         if elem.tag_name == 'strong':
-                            print(f"   ℹ️  已在第一頁")
+                            self._logger.info("ℹ️  已在第一頁")
                             return True
                         
                         elem_text = elem.text.strip() if elem.text else ""
@@ -53,20 +56,20 @@ class PageNavigator:
                         
                         elem_info = elem_text or elem_alt or "按鈕"
                         
-                        print(f"   ✓ 找到第一頁按鈕: {elem_info}")
+                        self._logger.info("✓ 找到第一頁按鈕: %s", elem_info)
                         
                         # 點擊
                         try:
                             elem.click()
                             time.sleep(3)
-                            print(f"   ✓ 已返回第一頁")
+                            self._logger.info("✓ 已返回第一頁")
                             return True
                         except Exception as click_error:
                             # 嘗試 JavaScript 點擊
                             try:
                                 self.driver.execute_script("arguments[0].click();", elem)
                                 time.sleep(3)
-                                print(f"   ✓ 已使用 JavaScript 返回第一頁")
+                                self._logger.info("✓ 已使用 JavaScript 返回第一頁")
                                 return True
                             except:
                                 continue
@@ -77,11 +80,11 @@ class PageNavigator:
             except Exception:
                 continue
         
-        print(f"   ⚠️  找不到第一頁按鈕，可能已在第一頁")
+        self._logger.warning("⚠️  找不到第一頁按鈕，可能已在第一頁")
         return False
     
     def go_to_next_page(self) -> bool:
-        print("\n📄 檢查是否有下一頁...")
+        self._logger.info("📄 檢查是否有下一頁...")
         time.sleep(1)
         
         # 尋找下一頁按鈕的多種可能選擇器
@@ -110,12 +113,12 @@ class PageNavigator:
                     try:
                         # 檢查元素是否可見
                         if not elem.is_displayed():
-                            print(f"   ⚠️  元素 [{idx}] 不可見，跳過")
+                            self._logger.warning("⚠️  元素 [%s] 不可見，跳過", idx)
                             continue
                         
                         # 檢查是否被禁用
                         if elem.get_attribute('disabled') or elem.get_attribute('aria-disabled') == 'true':
-                            print(f"   ⚠️  元素 [{idx}] 已禁用，跳過")
+                            self._logger.warning("⚠️  元素 [%s] 已禁用，跳過", idx)
                             continue
                         
                         # 獲取元素信息用於日誌
@@ -126,41 +129,41 @@ class PageNavigator:
                         
                         elem_info = elem_text or elem_alt or elem_title or elem_href[:30]
                         
-                        print(f"   ✓ 找到下一頁按鈕 [{idx}]: {elem_info}")
+                        self._logger.info("✓ 找到下一頁按鈕 [%s]: %s", idx, elem_info)
                         
                         # 檢查是否是指向當前頁的連結（跳過）
                         if "stockInfo=1" in elem_href or elem_text == "1":
-                            print(f"   ⚠️  這是當前頁連結，跳過")
+                            self._logger.warning("⚠️  這是當前頁連結，跳過")
                             continue
                         
                         # 嘗試點擊
-                        print(f"   正在點擊下一頁按鈕...")
+                        self._logger.info("正在點擊下一頁按鈕...")
                         try:
                             elem.click()
                             time.sleep(3)  # 等待新頁面加載
-                            print(f"   ✓ 已翻到下一頁")
+                            self._logger.info("✓ 已翻到下一頁")
                             return True
                         except Exception as click_error:
                             error_type = str(type(click_error).__name__)
                             
                             # 如果是被遮擋，嘗試 JavaScript 點擊
                             if "not clickable" in str(click_error).lower() or "ElementClickInterceptedException" in error_type:
-                                print(f"   ⚠️  元素被遮擋，嘗試 JavaScript 點擊...")
+                                self._logger.warning("⚠️  元素被遮擋，嘗試 JavaScript 點擊...")
                                 try:
                                     self.driver.execute_script("arguments[0].scrollIntoView(true);", elem)
                                     time.sleep(0.3)
                                     self.driver.execute_script("arguments[0].click();", elem)
                                     time.sleep(3)
-                                    print(f"   ✓ 已使用 JavaScript 翻到下一頁")
+                                    self._logger.info("✓ 已使用 JavaScript 翻到下一頁")
                                     return True
                                 except Exception as js_error:
-                                    print(f"   ⚠️  JavaScript 點擊失敗，嘗試下一個按鈕...")
+                                    self._logger.warning("⚠️  JavaScript 點擊失敗，嘗試下一個按鈕...")
                                     continue
                             elif "stale" in error_type.lower():
-                                print(f"   ⚠️  元素已失效，嘗試下一個按鈕...")
+                                self._logger.warning("⚠️  元素已失效，嘗試下一個按鈕...")
                                 continue
                             else:
-                                print(f"   ⚠️  點擊失敗: {error_type}，嘗試下一個按鈕...")
+                                self._logger.error("⚠️  點擊失敗: %s，嘗試下一個按鈕...", error_type)
                                 continue
                     
                     except Exception as elem_error:
@@ -171,14 +174,14 @@ class PageNavigator:
                             continue
             
             except Exception as selector_error:
-                print(f"   ⚠️  選擇器錯誤，嘗試下一個...")
+                self._logger.warning("⚠️  選擇器錯誤，嘗試下一個...")
                 continue
         
-        print(f"   ℹ️  找不到下一頁按鈕（已在最後一頁或分頁已禁用）")
+        self._logger.info("ℹ️  找不到下一頁按鈕（已在最後一頁或分頁已禁用）")
         return False
     
     def has_next_page(self) -> bool:
-        print("\n📄 檢測是否有下一頁按鈕...")
+        self._logger.info("📄 檢測是否有下一頁按鈕...")
         
         # 尋找下一頁按鈕的選擇器
         next_page_selectors = [
@@ -202,14 +205,14 @@ class PageNavigator:
                                 if "stockInfo=1" in elem_href or elem_text == "1":
                                     continue
                                 
-                                print(f"   ✓ 發現下一頁按鈕")
+                                self._logger.info("✓ 發現下一頁按鈕")
                                 return True
                     except Exception:
                         continue
             except Exception:
                 continue
         
-        print(f"   ✗ 未發現下一頁按鈕")
+        self._logger.info("✗ 未發現下一頁按鈕")
         return False
     
     def is_on_first_page(self) -> bool:
@@ -246,12 +249,12 @@ class PageNavigator:
                 el = self.driver.find_element(By.CSS_SELECTOR, selector)
                 bottom = el.location["y"] + el.size["height"]
                 if bottom > 0:
-                    print(f"   ✓ 找到 header，底部 Y={bottom}")
+                    self._logger.info("✓ 找到 header，底部 Y=%s", bottom)
                     return bottom
             except Exception:
                 continue
         
-        print(f"   ℹ️  未找到 header，預設 Y=0")
+        self._logger.info("ℹ️  未找到 header，預設 Y=0")
         return 0
     
     def get_report_item_top_y(self) -> int:
@@ -261,16 +264,16 @@ class PageNavigator:
             for el in els:
                 if el.is_displayed():
                     top_y = el.location["y"]
-                    print(f"   ✓ 找到「報告事項」，頂部 Y={top_y}")
+                    self._logger.info("✓ 找到「報告事項」，頂部 Y=%s", top_y)
                     return top_y
         except Exception:
             pass
         
-        print(f"   ℹ️  未找到「報告事項」")
+        self._logger.info("ℹ️  未找到「報告事項」")
         return None
     
     def find_all_unvoted_companies(self):
-        print("\n🔍 掃描未投票的公司...")
+        self._logger.info("🔍 掃描未投票的公司...")
         time.sleep(1)  # 等待頁面加載
         
         # 尋試多個 XPATH 選擇器（避免使用無效的 CSS 選擇器）
@@ -285,21 +288,21 @@ class PageNavigator:
             try:
                 rows = self.driver.find_elements(selector_by, selector_value)
                 if rows:
-                    print(f"   ✓ 找到 {len(rows)} 個未投票的公司")
+                    self._logger.info("✓ 找到 %s 個未投票的公司", len(rows))
                     return rows
             except Exception as e:
-                print(f"   ⚠️  選擇器失敗: {str(e)[:50]}")
+                self._logger.warning("⚠️  選擇器失敗: %s", str(e)[:50])
                 continue
         
         # 調試：顯示頁面內容
-        print("\n   📋 頁面內容分析：")
+        self._logger.info("📋 頁面內容分析：")
         try:
             page_text = self.driver.find_element(By.TAG_NAME, 'body').text
             if "未投票" in page_text:
-                print(f"   ✓ 頁面包含「未投票」文字，但選擇器無法定位")
-                print(f"   ⚠️  可能所有公司都已投票 (已投票|投票結果)")
+                self._logger.info("✓ 頁面包含「未投票」文字，但選擇器無法定位")
+                self._logger.warning("⚠️  可能所有公司都已投票 (已投票|投票結果)")
             else:
-                print(f"   ✗ 頁面不包含「未投票」文字")
+                self._logger.info("✗ 頁面不包含「未投票」文字")
         except Exception:
             pass
         
@@ -307,7 +310,7 @@ class PageNavigator:
         return []
     
     def find_unvoted_items(self):
-        print("\n🔍 掃描未投票的議案...")
+        self._logger.info("🔍 掃描未投票的議案...")
         
         try:
             # 嘗試多種方式尋找未投票的議案
@@ -319,14 +322,14 @@ class PageNavigator:
             for by, value in selectors:
                 items = self.driver.find_elements(by, value)
                 if items:
-                    print(f"   ✓ 找到 {len(items)} 個未投票的議案")
+                    self._logger.info("✓ 找到 %s 個未投票的議案", len(items))
                     return items
             
-            print("   ℹ️  嘗試備用方案...")
+            self._logger.info("ℹ️  嘗試備用方案...")
             return self.find_unvoted_items_fallback()
         
         except Exception as e:
-            print(f"❌ 查找未投票議案失敗: {str(e)}")
+            self._logger.error("❌ 查找未投票議案失敗: %s", str(e))
             return []
     
     def find_unvoted_items_fallback(self):
@@ -341,11 +344,11 @@ class PageNavigator:
                     if not checked:
                         items.append(row)
             
-            print(f"   ✓ 備用方案找到 {len(items)} 個未投票的議案")
+            self._logger.info("✓ 備用方案找到 %s 個未投票的議案", len(items))
             return items
         
         except Exception as e:
-            print(f"❌ 備用方案失敗: {str(e)}")
+            self._logger.error("❌ 備用方案失敗: %s", str(e))
             return []
     
     def safe_click(self, element, element_name="按鈕", remove_disabled=False):
@@ -360,7 +363,7 @@ class PageNavigator:
             # 如果是被遮擋，嘗試 JavaScript 點擊
             if "not clickable" in str(click_error).lower() or "ElementClickInterceptedException" in error_type:
                 try:
-                    print(f"   ⚠️  {element_name}被遮擋，嘗試 JavaScript 點擊...")
+                    self._logger.warning("⚠️  %s被遮擋，嘗試 JavaScript 點擊...", element_name)
                     self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
                     time.sleep(0.5)
                     
@@ -372,17 +375,16 @@ class PageNavigator:
                     time.sleep(1)
                     return True
                 except Exception as js_error:
-                    print(f"   ⚠️  JavaScript 點擊失敗: {str(type(js_error).__name__)}")
+                    self._logger.error("⚠️  JavaScript 點擊失敗: %s", str(type(js_error).__name__))
                     return False
             else:
                 # 如果是陳舊元素或其他異常
-                print(f"   ⚠️  點擊失敗 ({error_type}): {str(click_error)[:50]}")
+                self._logger.error("⚠️  點擊失敗 (%s): %s", error_type, str(click_error)[:50])
                 return False
 
     def click_vote_button(self):
-        print("\n" + "=" * 60)
-        print("【投票流程】點擊投票按鈕")
-        print("=" * 60)
+        self._logger.info("=" * 60)
+        self._logger.info("【投票流程】點擊投票按鈕")
         
         time.sleep(1)
         
@@ -396,21 +398,20 @@ class PageNavigator:
         
         for by, value in vote_button_selectors:
             buttons = self.driver.find_elements(by, value)
-            print(f"   找到 {len(buttons)} 個投票按鈕")
+            self._logger.info("找到 %s 個投票按鈕", len(buttons))
             
             for button in buttons:
                 if button.is_displayed():
-                    print(f"   正在點擊投票按鈕...")
+                    self._logger.info("正在點擊投票按鈕...")
                     if self.safe_click(button, "投票按鈕"):
-                        print(f"   ✓ 已經點擊投票按鈕")
+                        self._logger.info("✓ 已經點擊投票按鈕")
                         return (0, "已點擊投票按鈕")
         
         raise Exception("無法找到投票按鈕")
 
     def click_all_agree(self):
-        print("\n" + "=" * 60)
-        print("【投票流程】點擊全部贊成")
-        print("=" * 60)
+        self._logger.info("=" * 60)
+        self._logger.info("【投票流程】點擊全部贊成")
         
         time.sleep(1)
         
@@ -432,23 +433,23 @@ class PageNavigator:
         for by, value in agree_button_selectors:
             try:
                 buttons = self.driver.find_elements(by, value)
-                print(f"   找到 {len(buttons)} 個贊成按鈕")
+                self._logger.info("找到 %s 個贊成按鈕", len(buttons))
                 
                 for button in buttons:
                     if button.is_displayed():
-                        print(f"   正在點擊全部贊成按鈕...")
+                        self._logger.info("正在點擊全部贊成按鈕...")
                         if self.safe_click(button, "全部贊成按鈕"):
-                            print(f"   ✓ 已點擊全部贊成按鈕")
+                            self._logger.info("✓ 已點擊全部贊成按鈕")
                             return (0, "已點擊全部贊成")
             except Exception as e:
-                print(f"   ⚠️  尋找全部贊成按鈕時出錯: {str(e)[:50]}")
+                self._logger.warning("⚠️  尋找全部贊成按鈕時出錯: %s", str(e)[:50])
                 # 選擇器可能無效，繼續嘗試下一個
                 continue
         
         raise Exception("無法找到全部贊成按鈕")
 
     def click_next_step(self):
-        print("\n【投票流程】點擊下一步...")
+        self._logger.info("【投票流程】點擊下一步...")
         time.sleep(1)
         
         # 尋找「下一步」按鈕的選擇器（參考 template.py）
@@ -470,16 +471,16 @@ class PageNavigator:
             for button in buttons:
                 if button.is_displayed():
                     button_text = button.text.strip() or button.get_attribute('title')
-                    print(f"   找到按鈕: {button_text}")
+                    self._logger.info("找到按鈕: %s", button_text)
                     if self.safe_click(button, "下一步按鈕"):
-                        print(f"   ✓ 已點擊下一步按鈕")
+                        self._logger.info("✓ 已點擊下一步按鈕")
                         return (0, "已點擊下一步")
         
         raise Exception("無法找到下一步按鈕")
 
     def find_agree_button_for_director(self):
         try:
-            print("\n   檢查是否有直接的『全部贊成』按鈕...")
+            self._logger.info("檢查是否有直接的『全部贊成』按鈕...")
             
             # 尋找「全部贊成」相關的選項（可能是按鈕、連結或其他元素）
             agree_selectors = [
@@ -498,7 +499,7 @@ class PageNavigator:
             for by, value in agree_selectors:
                 try:
                     elements = self.driver.find_elements(by, value)
-                    print(f"   [檢查] 尋找『全部贊成』... 找到 {len(elements)} 個")
+                    self._logger.info("[檢查] 尋找『全部贊成』... 找到 %s 個", len(elements))
                     
                     for elem in elements:
                         try:
@@ -509,10 +510,10 @@ class PageNavigator:
                                 
                                 # 過濾掉「反對」和「棄權」
                                 if "反對" not in elem_text and "棄權" not in elem_text:
-                                    print(f"   ✓ 找到『全部贊成』按鈕: {elem_text}")
+                                    self._logger.info("✓ 找到『全部贊成』按鈕: %s", elem_text)
                                     
                                     if self.safe_click(elem, "全部贊成按鈕", remove_disabled=True):
-                                        print(f"   ✓ 已點擊『全部贊成』按鈕")
+                                        self._logger.info("✓ 已點擊『全部贊成』按鈕")
                                         return elem
                         except Exception as e2:
                             # 元素可能已過期，跳過
@@ -521,16 +522,16 @@ class PageNavigator:
                     # 選擇器可能無效，跳過
                     continue
             
-            print("   ℹ️  未找到直接的『全部贊成』按鈕")
+            self._logger.info("ℹ️  未找到直接的『全部贊成』按鈕")
             return None
         
         except Exception as e:
-            print(f"   ⚠️  檢查同意按鈕時出錯: {str(e)}")
+            self._logger.warning("⚠️  檢查同意按鈕時出錯: %s", str(e))
             return None
 
     def check_all_directors(self):
         try:
-            print("\n   正在全部勾選...")
+            self._logger.info("正在全部勾選...")
             
             # 尋找全部勾選按鈕
             check_all_selectors = [
@@ -542,30 +543,30 @@ class PageNavigator:
             
             for by, value in check_all_selectors:
                 elements = self.driver.find_elements(by, value)
-                print(f"   [選擇器] {value[:50]}... 找到 {len(elements)} 個")
+                self._logger.info("[選擇器] %s... 找到 %s 個", value[:50], len(elements))
                 
                 for elem in elements:
                     if elem.is_displayed():
                         elem_text = elem.text.strip() or elem.get_attribute('title') or "按鈕"
-                        print(f"   ✓ 找到「全選」按鈕: {elem_text}")
+                        self._logger.info("✓ 找到「全選」按鈕: %s", elem_text)
                         
                         elem.click()
                         time.sleep(2)
-                        print(f"   ✓ 已點擊「全選」按鈕")
+                        self._logger.info("✓ 已點擊「全選」按鈕")
                         
                         all_checkboxes = self.driver.find_elements(By.XPATH, '//input[@type="checkbox"]')
                         checked_count = sum(1 for cb in all_checkboxes if cb.is_selected())
-                        print(f"   ✓ 驗證勾選: 已勾選 {checked_count} 個")
+                        self._logger.info("✓ 驗證勾選: 已勾選 %s 個", checked_count)
                         return True
             
             # 備用方案：手動勾選所有 checkbox
-            print("   未找到「全選」按鈕，嘗試手動勾選...")
+            self._logger.info("未找到「全選」按鈕，嘗試手動勾選...")
             
             all_checkboxes = self.driver.find_elements(By.XPATH, '//table//input[@type="checkbox"]')
             if len(all_checkboxes) == 0:
                 all_checkboxes = self.driver.find_elements(By.XPATH, '//input[@type="checkbox"]')
             
-            print(f"   找到 {len(all_checkboxes)} 個複選框")
+            self._logger.info("找到 %s 個複選框", len(all_checkboxes))
             
             checked_count = 0
             unchecked_count = 0
@@ -579,22 +580,22 @@ class PageNavigator:
                         checked_count += 1
             
             total = checked_count + unchecked_count
-            print(f"   ✓ 已勾選 {total} 個複選框")
+            self._logger.info("✓ 已勾選 %s 個複選框", total)
             time.sleep(3)
             
             return total > 0
         
         except Exception as e:
-            print(f"   ❌ 勾選複選框時出錯 (代碼:101): {str(e)}")
+            self._logger.error("❌ 勾選複選框時出錯 (代碼:101): %s", str(e))
             return False
 
     def click_average_distribution(self):
         try:
-            print("   正在平均分配...")
+            self._logger.info("正在平均分配...")
             
             all_checkboxes = self.driver.find_elements(By.XPATH, '//input[@type="checkbox"]')
             checked_count = sum(1 for cb in all_checkboxes if cb.is_selected())
-            print(f"   當前已勾選的複選框: {checked_count} 個 (共 {len(all_checkboxes)} 個)")
+            self._logger.info("當前已勾選的複選框: %s 個 (共 %s 個)", checked_count, len(all_checkboxes))
             
             # 尋找平均分配按鈕
             distribution_selectors = [
@@ -606,28 +607,28 @@ class PageNavigator:
             
             for by, value in distribution_selectors:
                 buttons = self.driver.find_elements(by, value)
-                print(f"   [選擇器] {str(by)[:30]}... 找到 {len(buttons)} 個")
+                self._logger.info("[選擇器] %s... 找到 %s 個", str(by)[:30], len(buttons))
                 
                 for button in buttons:
                     if button.is_displayed():
                         button_text = button.text.strip() or button.get_attribute('value') or button.get_attribute('title') or "按鈕"
-                        print(f"   找到: {button_text[:50]}")
+                        self._logger.info("找到: %s", button_text[:50])
                         
                         is_disabled = button.get_attribute('disabled')
                         if is_disabled:
-                            print(f"   ⚠️  按鈕已禁用，跳過")
+                            self._logger.warning("⚠️  按鈕已禁用，跳過")
                             continue
                         
                         button.click()
                         time.sleep(2)
-                        print(f"   ✓ 已點擊平均分配")
+                        self._logger.info("✓ 已點擊平均分配")
                         return True
             
-            print("   ⚠️  未找到平均分配按鈕")
+            self._logger.warning("⚠️  未找到平均分配按鈕")
             return False
         
         except Exception as e:
-            print(f"   ❌ 點擊平均分配時出錯 (代碼:102): {str(e)}")
+            self._logger.error("❌ 點擊平均分配時出錯 (代碼:102): %s", str(e))
             return False
 
     def find_agree_option(self, item):
@@ -649,11 +650,11 @@ class PageNavigator:
             return None
         
         except Exception as e:
-            print(f"⚠️  尋找同意選項失敗: {str(e)}")
+            self._logger.warning("⚠️  尋找同意選項失敗: %s", str(e))
             return None
 
     def submit_vote(self):
-        print("\n【步驟】提交投票...")
+        self._logger.info("【步驟】提交投票...")
         time.sleep(2)  # 等待頁面穩定
         
         # 尋找提交按鈕（參考 template.py）
@@ -672,29 +673,29 @@ class PageNavigator:
         
         for by, value in submit_buttons:
             buttons = self.driver.find_elements(by, value)
-            print(f"   → 嘗試選擇器: {str(by)[:20]}..., 找到 {len(buttons)} 個")
+            self._logger.info("→ 嘗試選擇器: %s..., 找到 %s 個", str(by)[:20], len(buttons))
             
             for idx, button in enumerate(buttons):
                 try:
                     # 檢查是否可見
                     if not button.is_displayed():
-                        print(f"     [按鈕 {idx}] 不可見，跳過")
+                        self._logger.info("[按鈕 %s] 不可見，跳過", idx)
                         continue
                     
                     # 嘗試1: 直接點擊
-                    print(f"     [按鈕 {idx}] 嘗試直接點擊...")
+                    self._logger.info("[按鈕 %s] 嘗試直接點擊...", idx)
                     if self.safe_click(button, f"提交按鈕[{idx}]", remove_disabled=True):
-                        print(f"   ✓ 已提交投票")
+                        self._logger.info("✓ 已提交投票")
                         return (0, "已提交投票")
                 
                 except Exception as e:
                     continue
         
-        print(f"   ⚠️  未找到可點擊的提交按鈕")
+        self._logger.warning("⚠️  未找到可點擊的提交按鈕")
         raise Exception("無法找到或點擊提交按鈕")
 
     def click_query_button(self):
-        print("\n【步驟】點擊查詢按鈕...")
+        self._logger.info("【步驟】點擊查詢按鈕...")
         time.sleep(2)  # 等待頁面完全穩定
         
         # 尋找查詢按鈕或投票確認按鈕
@@ -723,17 +724,17 @@ class PageNavigator:
                             continue
                         
                         button_text = button.text.strip() or button.get_attribute('title') or "按鈕"
-                        print(f"   找到按鈕 [{idx}]: {button_text}，正在點擊...")
+                        self._logger.info("找到按鈕 [%s]: %s，正在點擊...", idx, button_text)
                         
                         if self.safe_click(button, button_text):
-                            print(f"   ✓ 已點擊按鈕「{button_text}」")
+                            self._logger.info("✓ 已點擊按鈕「%s」", button_text)
                             return (0, f"已點擊按鈕: {button_text}")
                     
                     except Exception as elem_error:
                         # 檢查元素屬性時出錯（可能是 is_displayed 檢查）
                         error_type = str(type(elem_error).__name__)
                         if "stale" in error_type.lower() or "StaleElementReferenceException" in error_type:
-                            print(f"   ⚠️  元素已失效，使用新的選擇器重試...")
+                            self._logger.warning("⚠️  元素已失效，使用新的選擇器重試...")
                             break  # 嘗試下一個選擇器
                         else:
                             continue
@@ -742,11 +743,11 @@ class PageNavigator:
                 # 選擇器本身可能有問題，繼續嘗試下一個
                 continue
         
-        print(f"   ⚠️  所有選擇器均失敗，無法找到查詢或確認按鈕")
+        self._logger.warning("⚠️  所有選擇器均失敗，無法找到查詢或確認按鈕")
         raise Exception("無法找到查詢或確認按鈕")
 
     def click_query_button_in_table(self, company_code):
-        print(f"\n【步驟】點擊表格中 {company_code} 的查詢按鈕...")
+        self._logger.info("【步驟】點擊表格中 %s 的查詢按鈕...", company_code)
         
         try:
             tbody = self.driver.find_element(By.TAG_NAME, "tbody")
@@ -785,20 +786,20 @@ class PageNavigator:
                                 time.sleep(0.5)
                                 
                                 if self.safe_click(query_link, f"表格查詢按鈕({company_code})"):
-                                    print(f"   ✓ 已點擊表格中 {company_code} 的查詢按鈕")
+                                    self._logger.info("✓ 已點擊表格中 %s 的查詢按鈕", company_code)
                                     return (0, f"已點擊表格查詢: {company_code}")
                 except Exception as e:
                     continue
             
-            print(f"   ❌ 無法找到公司 {company_code} 的查詢按鈕")
+            self._logger.error("❌ 無法找到公司 %s 的查詢按鈕", company_code)
             return (-1, f"無法找到公司 {company_code} 的查詢按鈕")
             
         except Exception as e:
-            print(f"   ❌ 表格查詢失敗: {str(e)}")
+            self._logger.error("❌ 表格查詢失敗: %s", str(e))
             return (-1, f"表格查詢失敗: {str(e)}")
 
     def go_back_to_list(self):
-        print("\n【步驟】返回投票列表...")
+        self._logger.info("【步驟】返回投票列表...")
         
         # 方式1: 點擊返回/返回投票列表按鈕
         back_buttons = [
@@ -815,22 +816,22 @@ class PageNavigator:
                 for button in buttons:
                     if button.is_displayed():
                         button_text = button.text.strip() or button.get_attribute('title') or "返回按鈕"
-                        print(f"   找到按鈕: {button_text}")
+                        self._logger.info("找到按鈕: %s", button_text)
                         
                         if self.safe_click(button, button_text):
-                            print(f"   ✓ 已返回列表")
+                            self._logger.info("✓ 已返回列表")
                             return (True, "已返回列表")
             except Exception as e:
                 # 選擇器可能無效，繼續嘗試
                 continue
         
         # 方式2: 使用瀏覽器返回
-        print("   📍 未發現返回按鈕，使用瀏覽器返回功能...")
+        self._logger.info("📍 未發現返回按鈕，使用瀏覽器返回功能...")
         try:
             self.driver.back()
             time.sleep(2)
-            print(f"   ✓ 已使用瀏覽器返回")
+            self._logger.info("✓ 已使用瀏覽器返回")
             return (True, "已使用瀏覽器返回")
         except Exception as e:
-            print(f"   ❌ 瀏覽器返回失敗: {str(e)}")
+            self._logger.error("❌ 瀏覽器返回失敗: %s", str(e))
             return (False, f"瀏覽器返回失敗: {str(e)}")

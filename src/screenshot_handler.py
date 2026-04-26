@@ -8,6 +8,8 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from page_navigator import PageNavigator
 
+logger = logging.getLogger(__name__)
+
 
 class ScreenshotHandler:
     def __init__(self, driver: webdriver.Chrome, page_navigator: PageNavigator = None, screenshot_dir: str = "screenshots"):
@@ -42,11 +44,28 @@ class ScreenshotHandler:
             filename = f"ERROR_{ts}_{safe_id}.png"
             filepath = os.path.join(self.screenshot_dir, filename)
             self.driver.save_screenshot(filepath)
-            logging.error(f"[ERROR截圖] id={safe_id} → {filepath}")
-            print(f"   📸 錯誤截圖已儲存: {filename}")
+            logger.error("[ERROR截圖] id=%s → %s", safe_id, filepath)
             return filepath
         except Exception as exc:
-            print(f"   ⚠️  錯誤截圖失敗: {exc!s:.60}")
+            logger.warning("錯誤截圖失敗 (%s): %s", error_id, exc)
+            return ""
+
+    def capture(self, checkpoint: str) -> str:
+        """在流程關鍵點截圖，用於 debug 狀態轉換。
+        檔名格式：CP_<timestamp>_<checkpoint>.png。
+        失敗時靜默，不影響主流程。"""
+        try:
+            if not os.path.exists(self.screenshot_dir):
+                os.makedirs(self.screenshot_dir)
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_cp = checkpoint.replace(" ", "_")[:50] if checkpoint else "cp"
+            filename = f"CP_{ts}_{safe_cp}.png"
+            filepath = os.path.join(self.screenshot_dir, filename)
+            self.driver.save_screenshot(filepath)
+            logger.debug("checkpoint截圖: %s → %s", safe_cp, filepath)
+            return filepath
+        except Exception as exc:
+            logger.debug("checkpoint截圖失敗 (%s): %s", checkpoint, exc)
             return ""
 
     def screenshot_all_companies_results(self, log_msg_func, screenshot_func):
