@@ -45,6 +45,8 @@ class VoteHandler:
         self.vote_timeout = 30
         self.voted_count = 0
         self.total_count = 0
+        self.is_maintenance = False  # 標記是否檢測到系統維護中
+        self.companies_info = []  # 記錄每個公司的投票信息 (code, name, status)
         self.page_navigator = page_navigator
         # 使用傳入的 screenshot_handler 或創建新的
         self.screenshot_handler = screenshot_handler if screenshot_handler else ScreenshotHandler(driver, page_navigator, screenshot_dir)
@@ -185,6 +187,19 @@ class VoteHandler:
     _XPATH_CONFIRM   = "//*[contains(.,'投票內容確認')] | //*[contains(.,'投票結果')]"
     _XPATH_DIRECTOR  = "//*[contains(.,'董事')]"
     _XPATH_SUBMIT    = "//button[contains(.,'提交')] | //button[contains(.,'確認')]"
+    _XPATH_MAINTENANCE = "//*[contains(.,'系統維護中')] | //*[contains(.,'Scheduled system maintenance')]"
+
+    def _detect_maintenance_message(self) -> bool:
+        """檢測系統是否顯示維護訊息
+        
+        返回值：
+        - True: 系統在維護中，應直接進入登出流程
+        - False: 系統正常運作，可進行投票
+        """
+        if self._has_dom_element(self._XPATH_MAINTENANCE):
+            logger.info("🔧 檢測到系統維護訊息，略過投票流程")
+            return True
+        return False
 
     def _detect_state(self) -> VoteState:
         """依 DOM 結構決定目前應處於哪個 VoteState"""
@@ -405,15 +420,31 @@ class VoteHandler:
 
 
     def execute_voting_loop(self, log_msg_func):
+        # 檢測系統維護訊息
+        if self._detect_maintenance_message():
+            log_msg_func("⏸️  系統維護中，直接進入結束流程")
+            self.is_maintenance = True
+            return {
+                'total': 0,
+                'voted': 0,
+                'failed': 0,
+                'has_unvoted': False
+            }
+        
+        self.is_maintenance = False  # 系統正常，非維護狀態
+        
         total_voted = 0
         total_failed = 0
         total_scanned = 0
+        
+        log_msg_func("ℹ️  開始掃描未投票公司...")
         
         # 循環投票：每次投票完成後重新掃描，而非預先保存所有元素
         # 原因：每次投票返回列表時頁面會刷新，預先保存的元素引用會變成陳舊(stale)
         while True:
             # 重新掃描未投票的公司（使用 PageNavigator）
             unvoted_companies = self.page_navigator.find_all_unvoted_companies()
+            logger.debug("掃描到 %d 家未投票公司", len(unvoted_companies))
             
             if not unvoted_companies:
                 # 當前頁沒有未投票公司，嘗試翻到下一頁
@@ -448,6 +479,11 @@ class VoteHandler:
             except Exception as e:
                 log_msg_func(f"⚠️  無法取得公司信息: {str(e)[:50]}")
                 total_failed += 1
+                self.companies_info.append({
+                    'code': '未知',
+                    'name': '未知',
+                    'status': '投票失敗'
+                })
                 continue
             
             # 在當前公司行中查找和點擊投票按鈕
@@ -469,6 +505,11 @@ class VoteHandler:
                     log_msg_func(f"❌ 備用方法也失敗: {str(e2)[:50]}")
                     self.screenshot_handler.save_error_screenshot(f"vote_btn_fail_{company_code}")
                     total_failed += 1
+                    self.companies_info.append({
+                        'code': company_code,
+                        'name': company_name,
+                        'status': '投票失敗'
+                    })
                     continue
             
             # 進行投票
@@ -497,11 +538,21 @@ class VoteHandler:
                     
                     log_msg_func("✓ 投票完成，準備掃描下一個公司...")
                     total_voted += 1
+                    self.companies_info.append({
+                        'code': company_code,
+                        'name': company_name,
+                        'status': '已投票'
+                    })
                 
                 except Exception as e:
                     log_msg_func(f"❌ 提交或確認失敗: {str(e)[:60]}")
                     self.screenshot_handler.save_error_screenshot(f"submit_fail_{company_code}")
                     total_failed += 1
+                    self.companies_info.append({
+                        'code': company_code,
+                        'name': company_name,
+                        'status': '投票失敗'
+                    })
                     # 嘗試返回列表
                     try:
                         self.driver.back()
@@ -512,6 +563,11 @@ class VoteHandler:
                 log_msg_func(f"❌ 投票內容為空或無法識別")
                 self.screenshot_handler.save_error_screenshot(f"vote_empty_{company_code}")
                 total_failed += 1
+                self.companies_info.append({
+                    'code': company_code,
+                    'name': company_name,
+                    'status': '投票失敗'
+                })
             
             # 防止無限迴圈：如果掃描次數太多仍有未投票公司，可能是頁面問題
             if total_scanned > 1000:

@@ -80,111 +80,117 @@ class ScreenshotHandler:
         # 第二步：逐頁捲動並截圖
         while True:
             log_msg_func(f"\n📄 檢查當前頁的已投票公司...")
-            index_take = 1  # 跳過表頭列（與 template 相同）
-            had_screenshot_on_this_page = False
+            current_page_completed = False
             
-            rows = self.driver.find_elements(By.TAG_NAME, "tr")
-            
-            for index, row in enumerate(rows[index_take:]):
-                try:
-                    if "已投票" not in row.text:
-                        continue
-                    
-                    # 解析代碼和名稱（第1欄）
-                    try:
-                        cols = row.find_elements(By.TAG_NAME, "td")
-                        first_col_text = cols[0].text.strip()
-                        parts = first_col_text.split()
-                        company_code = parts[0] if parts else ""
-                        company_name = " ".join(parts[1:]) if len(parts) > 1 else "未知"
-                    except Exception:
-                        company_code = "未知"
-                        company_name = "未知"
-                    
-                    # 已截圖過則跳過
-                    if company_code in self.screenshotted_companies:
-                        log_msg_func(f"   ℹ️  {company_name} ({company_code}) 已截圖，跳過")
-                        continue
-                    
-                    log_msg_func(f"\n   {company_name} ({company_code}) 查詢中...")
-                    
-                    # 參考 template：操作欄是 td[3]（根據 HTML 結構），找含「查詢」的 <a>
-                    query_clicked = False
-                    try:
-                        op_cells = row.find_elements(By.TAG_NAME, "td")
-                        if len(op_cells) > 3:  # 確保有操作欄
-                            for link in op_cells[3].find_elements(By.TAG_NAME, "a"):
-                                link_text = link.text.strip()
-                                if "查詢" in link_text:
-                                    link.click()
-                                    query_clicked = True
-                                    log_msg_func(f"   ✓ 已點擊查詢")
-                                    break
-                    except Exception as e:
-                        log_msg_func(f"   ⚠️  查詢按鈕定位失敗: {str(e)[:60]}")
-                    
-                    if not query_clicked:
-                        log_msg_func(f"   ⚠️  找不到查詢連結，跳過此公司")
-                        continue
-                    
-                    time.sleep(3)  # 等待查詢結果頁面加載
-                    
-                    # 截圖
-                    try:
-                        screenshot_func(company_code, company_name)
-                        self.screenshotted_companies.add(company_code)
-                        log_msg_func(f"   ✓ 截圖完成")
-                        had_screenshot_on_this_page = True
-                    except Exception as e:
-                        log_msg_func(f"   ⚠️  截圖失敗: {str(e)[:50]}")
-                    
-                    # 返回列表頁
-                    time.sleep(1)
-                    log_msg_func(f"   返回投票列表...")
-                    
-                    back_success = False
-                    try:
-                        # 方法1: 用 CSS 選擇器找返回按鈕
-                        self.driver.execute_script(
-                            "arguments[0].click();",
-                            self.driver.find_element(By.CSS_SELECTOR, 'button[onclick="back(); return false;"]')
-                        )
-                        back_success = True
-                    except Exception:
-                        # 方法2: 找含「返回」文字的按鈕
-                        try:
-                            for by, val in [
-                                (By.XPATH, '//a[contains(text(), "返回")]'),
-                                (By.XPATH, '//button[contains(text(), "返回")]'),
-                            ]:
-                                btns = self.driver.find_elements(by, val)
-                                for btn in btns:
-                                    if btn.is_displayed():
-                                        self.driver.execute_script("arguments[0].click();", btn)
-                                        back_success = True
-                                        break
-                                if back_success:
-                                    break
-                        except Exception:
-                            pass
-                    
-                    if not back_success:
-                        # 方法3: 用瀏覽器返回
-                        log_msg_func(f"   ⚠️  未找到返回按鈕，使用瀏覽器返回")
-                        self.driver.back()
-                    
-                    time.sleep(2)  # 等待返回到列表頁
+            # 每次重新獲取列表（因為 DOM 在返回後會更新）
+            while True:
+                rows = self.driver.find_elements(By.TAG_NAME, "tr")
+                found_unscreenshotted = False
                 
-                except Exception as row_error:
-                    # 此行處理失敗，繼續下一行
-                    log_msg_func(f"   ⚠️  行處理失敗: {str(row_error)[:50]}")
-                    continue
+                # 逐行檢查（跳過第一行表頭）
+                for index, row in enumerate(rows[1:], start=1):
+                    try:
+                        if "已投票" not in row.text:
+                            continue
+                        
+                        # 解析代碼和名稱（第1欄）
+                        try:
+                            cols = row.find_elements(By.TAG_NAME, "td")
+                            first_col_text = cols[0].text.strip()
+                            parts = first_col_text.split()
+                            company_code = parts[0] if parts else ""
+                            company_name = " ".join(parts[1:]) if len(parts) > 1 else "未知"
+                        except Exception:
+                            company_code = "未知"
+                            company_name = "未知"
+                        
+                        # 已截圖過則跳過
+                        if company_code in self.screenshotted_companies:
+                            log_msg_func(f"   ℹ️  {company_name} ({company_code}) 已截圖，跳過")
+                            continue
+                        
+                        # 找到未截圖的公司
+                        found_unscreenshotted = True
+                        log_msg_func(f"\n   {company_name} ({company_code}) 查詢中...")
+                        
+                        # 參考 template：操作欄是 td[3]（根據 HTML 結構），找含「查詢」的 <a>
+                        query_clicked = False
+                        try:
+                            op_cells = row.find_elements(By.TAG_NAME, "td")
+                            if len(op_cells) > 3:  # 確保有操作欄
+                                for link in op_cells[3].find_elements(By.TAG_NAME, "a"):
+                                    link_text = link.text.strip()
+                                    if "查詢" in link_text:
+                                        link.click()
+                                        query_clicked = True
+                                        log_msg_func(f"   ✓ 已點擊查詢")
+                                        break
+                        except Exception as e:
+                            log_msg_func(f"   ⚠️  查詢按鈕定位失敗: {str(e)[:60]}")
+                        
+                        if not query_clicked:
+                            log_msg_func(f"   ⚠️  找不到查詢連結，跳過此公司")
+                            continue
+                        
+                        time.sleep(3)  # 等待查詢結果頁面加載
+                        
+                        # 截圖
+                        try:
+                            screenshot_func(company_code, company_name)
+                            self.screenshotted_companies.add(company_code)
+                            log_msg_func(f"   ✓ 截圖完成")
+                        except Exception as e:
+                            log_msg_func(f"   ⚠️  截圖失敗: {str(e)[:50]}")
+                        
+                        # 返回列表頁
+                        time.sleep(1)
+                        log_msg_func(f"   返回投票列表...")
+                        
+                        back_success = False
+                        try:
+                            # 方法1: 用 CSS 選擇器找返回按鈕
+                            self.driver.execute_script(
+                                "arguments[0].click();",
+                                self.driver.find_element(By.CSS_SELECTOR, 'button[onclick="back(); return false;"]')
+                            )
+                            back_success = True
+                        except Exception:
+                            # 方法2: 找含「返回」文字的按鈕
+                            try:
+                                for by, val in [
+                                    (By.XPATH, '//a[contains(text(), "返回")]'),
+                                    (By.XPATH, '//button[contains(text(), "返回")]'),
+                                ]:
+                                    btns = self.driver.find_elements(by, val)
+                                    for btn in btns:
+                                        if btn.is_displayed():
+                                            self.driver.execute_script("arguments[0].click();", btn)
+                                            back_success = True
+                                            break
+                                    if back_success:
+                                        break
+                            except Exception:
+                                pass
+                        
+                        if not back_success:
+                            # 方法3: 用瀏覽器返回
+                            log_msg_func(f"   ⚠️  未找到返回按鈕，使用瀏覽器返回")
+                            self.driver.back()
+                        
+                        time.sleep(2)  # 等待返回到列表頁
+                        break  # 處理完一家後，重新獲取列表
+                    
+                    except Exception as row_error:
+                        # 此行處理失敗，繼續下一行
+                        log_msg_func(f"   ⚠️  行處理失敗: {str(row_error)[:50]}")
+                        continue
+                
+                # 如果沒找到未截圖的公司，表示當前頁完成
+                if not found_unscreenshotted:
+                    current_page_completed = True
+                    break
             
             # 檢查是否還有下一頁
-            if not had_screenshot_on_this_page:
-                log_msg_func(f"\n   ℹ️  當前頁無新的已投票公司需要截圖")
-            
-            # 嘗試翻到下一頁
             log_msg_func(f"\n📄 檢查是否有下一頁...")
             if self.page_navigator.go_to_next_page():
                 log_msg_func(f"   ✓ 已翻到下一頁，繼續處理...")

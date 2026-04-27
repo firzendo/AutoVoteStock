@@ -20,6 +20,7 @@ from vote_handler import VoteHandler
 from screenshot_handler import ScreenshotHandler
 from page_navigator import PageNavigator
 from screenshot import execute_final_screenshot
+from report_generator import ReportGenerator
 from selenium import webdriver
 
 # 載入.env配置
@@ -47,6 +48,8 @@ logging.basicConfig(
 def log_msg(msg: str):
     """同時輸出到 console + log 檔"""
     logging.info(msg)
+
+logger = logging.getLogger(__name__)
 
 
 # --- 2. 初始化WebDriver ---
@@ -86,6 +89,8 @@ def main():
     driver = None
     login_handler = None
     completed_successfully = False
+    page_navigator = None
+    vote_handler = None
 
     try:
         # 設置WebDriver
@@ -103,25 +108,25 @@ def main():
         # --- 步驟2：循環投票流程 ---
         log_msg("\n【步驟2】進行循環投票...")
         
-        # 在此處統一創建所有實體
-        # 1. 創建 PageNavigator（頁面導航）
+        # 建立實體
         page_navigator = PageNavigator(driver)
-        
-        # 2. 創建 ScreenshotHandler（截圖處理）
         screenshot_handler = ScreenshotHandler(driver, page_navigator, screenshot_dir="screenshots")
-        
-        # 3. 創建 VoteHandler（投票處理）
         vote_handler = VoteHandler(driver, page_navigator, screenshot_handler, screenshot_dir="screenshots")
         
-        # ⚠️  注意：execute_voting_loop 中不再進行截圖（避免 stale element reference 錯誤）
-        # 截圖將在投票完成後統一進行
+        # 投票
         voting_stats = vote_handler.execute_voting_loop(log_msg)
         
-        # --- 步驟2.5：投票完成後進行統一截圖 ---
-        # 等待所有投票完成，頁面恢復穩定狀態
-        log_msg("\n✓ 所有投票已完成，準備進行截圖...")
-        time.sleep(2)  # 截圖前讓頁面穩定（此處保留 sleep 因為截圖不需要等待特定元素）
-        execute_final_screenshot(driver, voting_stats, log_msg, vote_handler, page_navigator, output_dir="screenshots")
+        # 檢查是否系統維護中（使用 vote_handler 的標記）
+        if vote_handler.is_maintenance:
+            log_msg("\n⏸️  系統維護中，略過截圖流程")
+        else:
+            log_msg("\n✓ 所有投票已完成，準備進行截圖...")
+            
+            # 等待所有投票完成，頁面恢復穩定狀態
+            time.sleep(2)  # 截圖前讓頁面穩定（此處保留 sleep 因為截圖不需要等待特定元素）
+            
+            # 執行最終截圖流程
+            execute_final_screenshot(driver, voting_stats, log_msg, vote_handler, page_navigator, output_dir="screenshots")
 
         completed_successfully = True
 
@@ -132,6 +137,22 @@ def main():
         input("\n⛔ 發生錯誤，程式已暫停（網頁維持現狀）\n   確認後按 Enter 鍵關閉瀏覽器...")
 
     finally:
+        # 生成執行結果報告
+        if completed_successfully and driver and vote_handler and page_navigator:
+            try:
+                log_msg("\n【報告生成】生成投票結果統計...")
+                log_msg(f"ℹ️  共收集 {len(vote_handler.companies_info)} 家公司信息")
+                report_gen = ReportGenerator(driver, page_navigator, output_dir="output")
+                report_gen.generate_voting_report(
+                    vote_handler.companies_info,
+                    vote_handler.screenshot_handler.screenshotted_companies,
+                    log_msg
+                )
+            except Exception as e:
+                log_msg(f"⚠️  報告生成過程出錯: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+        
         # 步驟3：登出（僅在正常完成時執行）
         if completed_successfully and driver and login_handler:
             log_msg("\n【步驟3】執行登出...")

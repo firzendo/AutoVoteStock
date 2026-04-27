@@ -37,7 +37,7 @@ def execute_final_screenshot(driver, voting_stats, log_msg_func, vote_handler, p
 def create_company_screenshot_callback(driver, log_msg_func, page_navigator, output_dir="screenshots"):
     """
     創建一個公司投票結果截圖回調函數
-    截圖範圍：排除頁面 header 及「報告事項」以下的內容
+    截圖範圍：從「貴股東對」開始，到「最近一次投票時間」結束
     
     Returns:
         function: 接收 company_code 和 company_name 進行截圖的函數
@@ -62,11 +62,29 @@ def create_company_screenshot_callback(driver, log_msg_func, page_navigator, out
             # 取得頁面設備像素比（高 DPI）
             device_pixel_ratio = page_navigator.get_device_pixel_ratio()
 
-            # 取得 header 底部 Y（截圖從此開始）
-            crop_top = page_navigator.get_header_bottom_y()
+            # 尋找裁剪範圍
+            # crop_top: 從「貴股東對」開始
+            crop_top = 0
+            try:
+                title_elem = driver.find_element(By.XPATH, "//*[contains(text(), '貴股東對')]")
+                crop_top = driver.execute_script("return arguments[0].getBoundingClientRect().top + window.scrollY;", title_elem)
+            except Exception:
+                log_msg_func(f"   ⚠️  無法定位標題，使用預設頂部")
+                crop_top = 100
 
-            # 取得「報告事項」的頂部 Y（截圖到此結束）
-            crop_bottom = page_navigator.get_report_item_top_y()
+            # crop_bottom: 到「最近一次投票時間」結束
+            crop_bottom = None
+            try:
+                time_elem = driver.find_element(By.XPATH, "//*[contains(text(), '最近一次投票時間')]")
+                # 取得該元素的下邊界
+                rect = driver.execute_script(
+                    "const r = arguments[0].getBoundingClientRect(); return {bottom: r.bottom + window.scrollY};",
+                    time_elem
+                )
+                crop_bottom = rect['bottom'] + 20  # 多加 20px 的空白
+            except Exception:
+                log_msg_func(f"   ⚠️  無法定位投票時間，使用全頁高度")
+                crop_bottom = None
 
             # 全頁截圖存到記憶體
             png_bytes = driver.get_screenshot_as_png()
@@ -85,7 +103,7 @@ def create_company_screenshot_callback(driver, log_msg_func, page_navigator, out
             cropped = img.crop((0, top_px, img_w, bottom_px))
             cropped.save(filename)
 
-            log_msg_func(f"   ✓ 已保存截圖: {filename}  (裁剪 y={crop_top}~{crop_bottom})")
+            log_msg_func(f"   ✓ 已保存截圖: {filename}")
         except Exception as e:
             log_msg_func(f"   ❌ 截圖失敗: {str(e)}")
 
