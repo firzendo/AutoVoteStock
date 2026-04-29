@@ -138,7 +138,7 @@ def main():
 
     finally:
         # 生成執行結果報告
-        if completed_successfully and driver and vote_handler and page_navigator:
+        if completed_successfully and driver and vote_handler and page_navigator and not vote_handler.is_maintenance:
             try:
                 log_msg("\n【報告生成】生成投票結果統計...")
                 log_msg(f"ℹ️  共收集 {len(vote_handler.companies_info)} 家公司信息")
@@ -146,7 +146,9 @@ def main():
                 report_gen.generate_voting_report(
                     vote_handler.companies_info,
                     vote_handler.screenshot_handler.screenshotted_companies,
-                    log_msg
+                    log_msg,
+                    egift_skipped_companies=vote_handler.screenshot_handler.egift_skipped_companies,
+                    manual_skipped_companies=vote_handler.screenshot_handler.manual_skip_companies
                 )
             except Exception as e:
                 log_msg(f"⚠️  報告生成過程出錯: {str(e)}")

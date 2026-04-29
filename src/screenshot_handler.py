@@ -1,12 +1,16 @@
 #!/usr/bin/env python
 # coding: utf-8
 import os
+import re
 import time
 import datetime
 import logging
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from dotenv import load_dotenv
 from page_navigator import PageNavigator
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +20,18 @@ class ScreenshotHandler:
         self.driver = driver
         self.screenshot_dir = screenshot_dir
         self.screenshotted_companies = self._load_screenshotted_from_disk()
+        self.egift_skipped_companies: set = set()  # 因符合eGift資格而略過截圖的公司代碼
+        self.manual_skip_companies: set = self._load_skip_list_from_env()  # .env 手動截圖跳過名單
         # 使用傳入的 page_navigator 或創建新的
         self.page_navigator = page_navigator
+
+    def _load_skip_list_from_env(self) -> set:
+        """從 .env 的 SCREENSHOT_SKIP_LIST=[1432,6757] 載入截圖跳過名單"""
+        raw = os.getenv('SCREENSHOT_SKIP_LIST', '')
+        codes = {c.strip() for c in re.sub(r'[\[\]]', '', raw).split(',') if c.strip()}
+        if codes:
+            logger.info("📋 截圖跳過名單（手動）: %s", ', '.join(sorted(codes)))
+        return codes
     
     def _load_screenshotted_from_disk(self) -> set:
         codes = set()
@@ -108,6 +122,30 @@ class ScreenshotHandler:
                         if company_code in self.screenshotted_companies:
                             log_msg_func(f"   ℹ️  {company_name} ({company_code}) 已截圖，跳過")
                             continue
+                        
+                        # 手動跳過名單（.env SCREENSHOT_SKIP_LIST）
+                        if company_code in self.manual_skip_companies:
+                            logger.info("📋 %s (%s) 在手動跳過名單中，略過截圖", company_name, company_code)
+                            log_msg_func(f"   📋 {company_name} ({company_code}) 在跳過名單中，略過截圖")
+                            self.screenshotted_companies.add(company_code)
+                            continue
+                        
+                        # 檢查是否符合 eGift 發放資格（col[4]），符合者不需截圖
+                        try:
+                            egift_text = cols[4].text.strip() if len(cols) > 4 else ""
+                            # 有內容（非空、非"-"）表示符合資格
+                            if egift_text and egift_text != "-":
+                                logger.info(
+                                    "⏭️  %s (%s) 符合eGift發放資格，略過截圖",
+                                    company_name, company_code
+                                )
+                                log_msg_func(f"   ⏭️  {company_name} ({company_code}) 符合eGift資格，略過截圖")
+                                # 記錄到 egift_skipped，並標記為已處理避免重複掃描
+                                self.egift_skipped_companies.add(company_code)
+                                self.screenshotted_companies.add(company_code)
+                                continue
+                        except Exception:
+                            pass
                         
                         # 找到未截圖的公司
                         found_unscreenshotted = True

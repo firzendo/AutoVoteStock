@@ -113,7 +113,8 @@ class ReportGenerator:
         log_msg_func(f"ℹ️  名單掃描完畢，共 {len(all_companies)} 家公司")
         return all_companies
 
-    def generate_voting_report(self, companies_info, screenshotted_companies, log_msg_func):
+    def generate_voting_report(self, companies_info, screenshotted_companies, log_msg_func,
+                               egift_skipped_companies=None, manual_skipped_companies=None):
         """生成投票結果報告：掃描完整名單，標記投票狀況與截圖狀況
 
         Args:
@@ -121,7 +122,11 @@ class ReportGenerator:
                             [{'code': '2102', 'name': '泰豐', 'status': '已投票'}, ...]
             screenshotted_companies: 已截圖的公司代碼集合 {'2102', '2103', ...}
             log_msg_func: 日誌函數
+            egift_skipped_companies: 因符合eGift資格而略過截圖的代碼集合（可選）
+            manual_skipped_companies: .env SCREENSHOT_SKIP_LIST 手動跳過的代碼集合（可選）
         """
+        egift_skipped = egift_skipped_companies or set()
+        manual_skipped = manual_skipped_companies or set()
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 
@@ -183,7 +188,14 @@ class ReportGenerator:
                     else:
                         vote_status = page_status if page_status != '-' else "-"
 
-                    is_screenshotted = "✓" if code in screenshotted_companies else "-"
+                    if code in egift_skipped:
+                        is_screenshotted = "eGift"
+                    elif code in manual_skipped:
+                        is_screenshotted = "跳過"
+                    elif code in screenshotted_companies:
+                        is_screenshotted = "✓"
+                    else:
+                        is_screenshotted = "-"
 
                     row = [
                         code,

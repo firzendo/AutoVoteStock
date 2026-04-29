@@ -145,7 +145,7 @@ class VoteHandler:
 
             # 步驟2: 平均分配
             logger.info("準備點擊平均分配按鈕...")
-            self.screenshot_handler.capture("before_director_agree_next")
+            # self.screenshot_handler.capture("before_director_agree_next")
             if self.page_navigator.click_average_distribution():
                 logger.info("✓ 已點擊平均分配")
             else:
@@ -154,7 +154,7 @@ class VoteHandler:
 
             # 步驟3: 用 _retry_click 點擊下一步（單一動作 retry）
             logger.info("⏳ 等待新頁面加載...")
-            self.screenshot_handler.capture("before_director_next_step")
+            # self.screenshot_handler.capture("before_director_next_step")
             if self._retry_click(_next_xpath):
                 logger.info("✓ 已點擊下一步")
                 self._wait_page_ready()
@@ -215,7 +215,7 @@ class VoteHandler:
 
     def _handle_state_confirm(self) -> dict:
         logger.info("✓ 確認/結果頁面 → 投票完成")
-        self.screenshot_handler.capture("state_confirm")
+        # self.screenshot_handler.capture("state_confirm")
         return {'total': 1, 'voted': 1, 'failed': 0}
 
     def _handle_state_voting(self, page_text: str) -> dict | None:
@@ -234,7 +234,7 @@ class VoteHandler:
         # 標準投票：_retry_click 做單一動作 retry（wait+get+click 原子）
         if self._has_dom_element(self._XPATH_VOTE_OPTS):
             logger.info("✓ 標準投票選項")
-            self.screenshot_handler.capture("before_agree")
+            # self.screenshot_handler.capture("before_agree")
             try:
                 code, msg = self.page_navigator.click_all_agree()
                 if code == 0:
@@ -244,7 +244,7 @@ class VoteHandler:
                 input("\n按 Enter 鍵繼續...\n")
 
             # 用 _retry_click 點「下一步」（單一動作細粒度 retry，不重跑整個 workflow）
-            self.screenshot_handler.capture("before_next_step")
+            # self.screenshot_handler.capture("before_next_step")
             clicked = self._retry_click(self._XPATH_NEXT, timeout=5)
             if clicked:
                 logger.info("✓ 已點擊下一步")
@@ -328,7 +328,7 @@ class VoteHandler:
                 # 偵測狀態 → dispatch
                 state = self._detect_state()
                 logger.info("→ state=%s", state.value)
-                self.screenshot_handler.capture(f"state_{state.value}_iter{iteration}")
+                # self.screenshot_handler.capture(f"state_{state.value}_iter{iteration}")
 
                 handler = _dispatch.get(state)
                 if handler is None:
@@ -522,7 +522,7 @@ class VoteHandler:
             if vote_result.get('total', 0) > 0:
                 log_msg_func("✓ 提交投票...")
                 try:
-                    self.screenshot_handler.capture(f"before_submit_{company_code}")
+                    # self.screenshot_handler.capture(f"before_submit_{company_code}")
                     code, msg = self.page_navigator.submit_vote()
                     # 等待確認按鈕（取代 time.sleep(1)）
                     self._wait_clickable(
