@@ -439,14 +439,27 @@ class VoteHandler:
         
         log_msg_func("ℹ️  開始掃描未投票公司...")
         
+        # 先返回第一頁，確保從頭開始掃描
+        self.page_navigator.go_to_first_page()
+        self._wait_page_ready(timeout=10)
+        
         # 循環投票：每次投票完成後重新掃描，而非預先保存所有元素
         # 原因：每次投票返回列表時頁面會刷新，預先保存的元素引用會變成陳舊(stale)
+        visited_empty_urls: set = set()  # 已確認無未投票公司的頁面 URL，用於偵測循環
+        
         while True:
             # 重新掃描未投票的公司（使用 PageNavigator）
             unvoted_companies = self.page_navigator.find_all_unvoted_companies()
             logger.debug("掃描到 %d 家未投票公司", len(unvoted_companies))
             
             if not unvoted_companies:
+                # 記錄當前 URL，若已訪問過則代表已循環一圈，可退出
+                current_url = self.driver.current_url
+                if current_url in visited_empty_urls:
+                    log_msg_func("✓ 已遍歷所有頁面（無更多未投票公司），投票循環結束")
+                    break
+                visited_empty_urls.add(current_url)
+                
                 # 當前頁沒有未投票公司，嘗試翻到下一頁
                 log_msg_func("📄 當前頁無未投票公司，嘗試翻頁...")
                 
@@ -458,6 +471,9 @@ class VoteHandler:
                     # 無下一頁或翻頁失敗，投票循環完成
                     log_msg_func("✓ 已完成所有頁面投票，投票循環結束")
                     break
+            
+            # 找到未投票公司，重置已訪問記錄（投票後頁面狀態會改變）
+            visited_empty_urls.clear()
             
             total_scanned += 1
             

@@ -83,100 +83,114 @@ class PageNavigator:
         self._logger.warning("⚠️  找不到第一頁按鈕，可能已在第一頁")
         return False
     
+    def _get_page_info(self) -> tuple:
+        """解析頁面的「頁次：X/Y」文字，回傳 (current_page, total_pages)。
+        無法解析時回傳 (0, 0)。"""
+        import re
+        try:
+            body_text = self.driver.find_element(By.TAG_NAME, 'body').text
+            m = re.search(r'頁次[：:]\s*(\d+)\s*/\s*(\d+)', body_text)
+            if m:
+                return int(m.group(1)), int(m.group(2))
+        except Exception:
+            pass
+        return 0, 0
+
     def go_to_next_page(self) -> bool:
         self._logger.info("📄 檢查是否有下一頁...")
         time.sleep(1)
-        
-        # 尋找下一頁按鈕的多種可能選擇器
-        next_page_selectors = [
-            # 方法1: 圖片按鈕 - alt="下一頁"
-            (By.XPATH, '//img[@alt="下一頁"]'),
-            
-            # 方法2: 帶 stockInfo 參數的連結（找最小的頁碼或包含增量的）
-            (By.XPATH, '//a[contains(@href, "stockInfo=")]'),
-            
-            # 方法3: 純文本頁碼連結（2, 3 等）
-            (By.XPATH, '//span[@class="pagelinks"]//a[not(@title="Go to page 1")]'),
-            
-            # 方法4: 按鈕元素
-            (By.XPATH, '//button[contains(text(), "下一") or contains(text(), "下一頁")]'),
-            
-            # 方法5: 通用分頁框架
-            (By.XPATH, '//a[@class="next-page"], //li[@class="next"]/a'),
-        ]
-        
-        for by, selector in next_page_selectors:
+
+        # ── 最優先：根據「頁次：X/Y」判斷是否已是最後一頁 ──────────────
+        current_page, total_pages = self._get_page_info()
+        if total_pages > 0:
+            self._logger.info("📄 目前頁次：%d/%d", current_page, total_pages)
+            if current_page >= total_pages:
+                self._logger.info("ℹ️  已在最後一頁，無需翻頁")
+                return False
+            next_page = current_page + 1
+        else:
+            next_page = 0  # 無法判斷，後續方法不過濾頁碼
+
+        def _try_click(elem) -> bool:
+            """嘗試點擊元素（含 JS fallback），成功回傳 True。"""
             try:
-                elements = self.driver.find_elements(by, selector)
-                
-                for idx, elem in enumerate(elements):
+                elem.click()
+            except Exception as ce:
+                if "not clickable" in str(ce).lower() or "Intercepted" in type(ce).__name__:
                     try:
-                        # 檢查元素是否可見
-                        if not elem.is_displayed():
-                            self._logger.warning("⚠️  元素 [%s] 不可見，跳過", idx)
-                            continue
-                        
-                        # 檢查是否被禁用
-                        if elem.get_attribute('disabled') or elem.get_attribute('aria-disabled') == 'true':
-                            self._logger.warning("⚠️  元素 [%s] 已禁用，跳過", idx)
-                            continue
-                        
-                        # 獲取元素信息用於日誌
-                        elem_text = elem.text.strip() if elem.text else ""
-                        elem_href = elem.get_attribute('href') or ""
-                        elem_alt = elem.get_attribute('alt') or ""
-                        elem_title = elem.get_attribute('title') or ""
-                        
-                        elem_info = elem_text or elem_alt or elem_title or elem_href[:30]
-                        
-                        self._logger.info("✓ 找到下一頁按鈕 [%s]: %s", idx, elem_info)
-                        
-                        # 檢查是否是指向當前頁的連結（跳過）
-                        if "stockInfo=1" in elem_href or elem_text == "1":
-                            self._logger.warning("⚠️  這是當前頁連結，跳過")
-                            continue
-                        
-                        # 嘗試點擊
-                        self._logger.info("正在點擊下一頁按鈕...")
-                        try:
-                            elem.click()
-                            time.sleep(3)  # 等待新頁面加載
-                            self._logger.info("✓ 已翻到下一頁")
+                        self.driver.execute_script("arguments[0].scrollIntoView(true);", elem)
+                        time.sleep(0.3)
+                        self.driver.execute_script("arguments[0].click();", elem)
+                    except Exception:
+                        return False
+                elif "stale" in type(ce).__name__.lower():
+                    return False
+                else:
+                    return False
+            time.sleep(3)
+            self._logger.info("✓ 已翻到下一頁")
+            return True
+
+        # ── 方法1：img alt="下一頁" 的父連結 ──────────────────────────
+        try:
+            imgs = self.driver.find_elements(By.XPATH, '//img[@alt="下一頁"]')
+            for img in imgs:
+                try:
+                    link = img.find_element(By.XPATH, './ancestor::a[1]')
+                    if link.is_displayed() and not link.get_attribute('disabled'):
+                        self._logger.info("正在點擊下一頁按鈕（img）...")
+                        if _try_click(link):
                             return True
-                        except Exception as click_error:
-                            error_type = str(type(click_error).__name__)
-                            
-                            # 如果是被遮擋，嘗試 JavaScript 點擊
-                            if "not clickable" in str(click_error).lower() or "ElementClickInterceptedException" in error_type:
-                                self._logger.warning("⚠️  元素被遮擋，嘗試 JavaScript 點擊...")
-                                try:
-                                    self.driver.execute_script("arguments[0].scrollIntoView(true);", elem)
-                                    time.sleep(0.3)
-                                    self.driver.execute_script("arguments[0].click();", elem)
-                                    time.sleep(3)
-                                    self._logger.info("✓ 已使用 JavaScript 翻到下一頁")
-                                    return True
-                                except Exception as js_error:
-                                    self._logger.warning("⚠️  JavaScript 點擊失敗，嘗試下一個按鈕...")
-                                    continue
-                            elif "stale" in error_type.lower():
-                                self._logger.warning("⚠️  元素已失效，嘗試下一個按鈕...")
-                                continue
-                            else:
-                                self._logger.error("⚠️  點擊失敗: %s，嘗試下一個按鈕...", error_type)
-                                continue
-                    
-                    except Exception as elem_error:
-                        error_type = str(type(elem_error).__name__)
-                        if "stale" in error_type.lower():
-                            continue
-                        else:
-                            continue
-            
-            except Exception as selector_error:
-                self._logger.warning("⚠️  選擇器錯誤，嘗試下一個...")
-                continue
-        
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # ── 方法2：stockInfo=N 連結，只取 N == next_page ───────────────
+        if next_page > 0:
+            try:
+                links = self.driver.find_elements(By.XPATH, f'//a[contains(@href, "stockInfo={next_page}")]')
+                for link in links:
+                    try:
+                        if link.is_displayed() and not link.get_attribute('disabled'):
+                            self._logger.info("正在點擊第 %d 頁連結...", next_page)
+                            if _try_click(link):
+                                return True
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # ── 方法3：純文字頁碼連結（數字等於 next_page）─────────────────
+        if next_page > 0:
+            try:
+                links = self.driver.find_elements(By.XPATH, '//span[@class="pagelinks"]//a | //div[@class="pagelinks"]//a')
+                for link in links:
+                    try:
+                        if link.text.strip() == str(next_page) and link.is_displayed():
+                            self._logger.info("正在點擊頁碼 %d...", next_page)
+                            if _try_click(link):
+                                return True
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # ── 方法4：按鈕文字「下一頁」────────────────────────────────────
+        try:
+            btns = self.driver.find_elements(
+                By.XPATH, '//button[contains(text(),"下一頁")] | //a[contains(text(),"下一頁")]')
+            for btn in btns:
+                try:
+                    if btn.is_displayed() and not btn.get_attribute('disabled'):
+                        self._logger.info("正在點擊「下一頁」按鈕...")
+                        if _try_click(btn):
+                            return True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         self._logger.info("ℹ️  找不到下一頁按鈕（已在最後一頁或分頁已禁用）")
         return False
     
@@ -294,19 +308,28 @@ class PageNavigator:
                 self._logger.warning("⚠️  選擇器失敗: %s", str(e)[:50])
                 continue
         
-        # 調試：顯示頁面內容
-        self._logger.info("📋 頁面內容分析：")
+        # 備用方案：手動掃描所有 <tr>，以 Python 篩選包含「未投票」的列
+        self._logger.debug("📋 XPath 未命中，改用手動掃描 <tr>...")
         try:
-            page_text = self.driver.find_element(By.TAG_NAME, 'body').text
-            if "未投票" in page_text:
-                self._logger.info("✓ 頁面包含「未投票」文字，但選擇器無法定位")
-                self._logger.warning("⚠️  可能所有公司都已投票 (已投票|投票結果)")
-            else:
-                self._logger.info("✗ 頁面不包含「未投票」文字")
-        except Exception:
-            pass
+            all_rows = self.driver.find_elements(By.TAG_NAME, 'tr')
+            # 注意：頁面 UI 標籤（如「已投票/未投票」等面板文字）可能包含「未投票」
+            # 所以需確認 <td> 內容包含「未投票」，而非將表頭列計入
+            unvoted_rows = []
+            for r in all_rows:
+                try:
+                    cells = r.find_elements(By.TAG_NAME, 'td')
+                    if cells and '未投票' in r.text:
+                        unvoted_rows.append(r)
+                except Exception:
+                    pass
+            if unvoted_rows:
+                self._logger.info("✓ 手動掃描找到 %d 個未投票的公司", len(unvoted_rows))
+                return unvoted_rows
+        except Exception as e:
+            self._logger.warning("⚠️  手動掃描失敗: %s", str(e)[:60])
         
-        # 返回空列表而不是 raise exception，讓上層處理
+        # 所有方式均未找到未投票列，返回空列表
+        self._logger.debug("此頁無未投票內容")
         return []
     
     def find_unvoted_items(self):
