@@ -34,18 +34,20 @@ class ScreenshotHandler:
         return codes
     
     def _load_screenshotted_from_disk(self) -> set:
+        """遞迴掃描 screenshot_dir 及所有子資料夾，載入已截圖的公司代碼。"""
         codes = set()
         if not os.path.exists(self.screenshot_dir):
             return codes
-        for fname in os.listdir(self.screenshot_dir):
-            if not fname.endswith('.png'):
-                continue
-            # 去掉 .png 後，從右邊找最後一個 '_' 後面的內容為代碼
-            fname_no_ext = fname[:-4]
-            last_idx = fname_no_ext.rfind('_')
-            if last_idx != -1:
-                code = fname_no_ext[last_idx + 1:]
-                codes.add(code)
+        for dirpath, _dirnames, filenames in os.walk(self.screenshot_dir):
+            for fname in filenames:
+                if not fname.endswith('.png'):
+                    continue
+                # 去掉 .png 後，從右邊找最後一個 '_' 後面的內容為代碼
+                fname_no_ext = fname[:-4]
+                last_idx = fname_no_ext.rfind('_')
+                if last_idx != -1:
+                    code = fname_no_ext[last_idx + 1:]
+                    codes.add(code)
         return codes
 
     def save_error_screenshot(self, error_id: str = "") -> str:

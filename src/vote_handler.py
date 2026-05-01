@@ -107,69 +107,44 @@ class VoteHandler:
         # ⚠️  不加 @retry：此方法為 workflow，重試可能導致重複點擊已改變的 DOM
         try:
             logger.info("=" * 60)
-            logger.info("【投票流程】董事選舉 - 全部勾選 + 平均分配")
+            logger.info("【投票流程】董事選舉 - 全部棄權")
 
             self._wait_page_ready()
 
-            # 結構判斷（. = 包含所有子節點文字，比 text() 更穩）
             if not self._has_dom_element("//*[contains(.,'董事')]"):
                 logger.warning("未檢測到董事選舉頁面")
                 return False
 
             logger.info("✓ 檢測到董事選舉頁面")
 
-            # 直接有「全部贊成」按鈕 → 用 _retry_click 點擊（單一動作 retry）
             _next_xpath = "//button[contains(.,'下一步')] | //a[contains(.,'下一步')]"
-            agree_button = self.page_navigator.find_agree_button_for_director()
-            if agree_button:
-                logger.info("✓ 已點擊『全部贊成』按鈕，準備進入下一步...")
-                # _retry_click：wait + get + click 原子操作，避免 stale race condition
-                if self._retry_click(_next_xpath):
-                    logger.info("✓ 已點擊下一步，董事選舉完成，進入下一個議案")
-                    self._wait_page_ready()
-                    return True
-                else:
-                    logger.warning("下一步按鈕未出現或點擊失敗")
-                    return True
 
-            # 步驟1: 全部勾選複選框
-            if self.page_navigator.check_all_directors():
-                logger.info("✓ 已全部勾選")
+            # 優先尋找「全部棄權」按鈕
+            _abstain_xpath = (
+                "//button[contains(.,'全部棄權')] | //a[contains(.,'全部棄權')]"
+                " | //input[@value='全部棄權']"
+            )
+            if self._retry_click(_abstain_xpath):
+                logger.info("✓ 已點擊『全部棄權』按鈕")
             else:
-                logger.warning("未能成功全部勾選，等待用戶手動勾選...")
-                input("\n⏳ 請手動勾選所有董事，然後按 Enter 繼續...\n")
+                logger.warning("⚠️  找不到『全部棄權』按鈕，略過點擊直接進入下一步")
 
-            # 等待平均分配按鈕（只做 guard，click 由 page_navigator 負責）
-            logger.info("⏳ 等待勾選狀態確認...")
-            self._wait_clickable("//*[contains(.,'平均分配')]")
-
-            # 步驟2: 平均分配
-            logger.info("準備點擊平均分配按鈕...")
-            # self.screenshot_handler.capture("before_director_agree_next")
-            if self.page_navigator.click_average_distribution():
-                logger.info("✓ 已點擊平均分配")
-            else:
-                logger.warning("未能點擊平均分配，等待用戶手動操作...")
-                input("\n⏳ 請手動點擊平均分配，然後按 Enter 繼續...\n")
-
-            # 步驟3: 用 _retry_click 點擊下一步（單一動作 retry）
-            logger.info("⏳ 等待新頁面加載...")
-            # self.screenshot_handler.capture("before_director_next_step")
+            # 點擊下一步
             if self._retry_click(_next_xpath):
-                logger.info("✓ 已點擊下一步")
+                logger.info("✓ 已點擊下一步，董事選舉完成，進入下一個議案")
                 self._wait_page_ready()
-
-                # 結構判斷：是否還有投票選項
-                _vote_xpath = (
-                    "//button[contains(.,'全部贊成')] | //a[contains(.,'全部贊成')]"
-                    " | //button[contains(.,'全部反對')] | //button[contains(.,'全部棄權')]"
-                )
-                if self._has_dom_element(_vote_xpath):
-                    logger.info("✓ 檢測到更多投票項目，繼續處理")
+                # 處理「尚有選舉權數未行使」的確認 modal
+                _modal_xpath = "//div[@class='modal'] | //*[contains(.,'選舉權數未行使')]"
+                time.sleep(1)
+                if self._has_dom_element(_modal_xpath):
+                    logger.info("✓ 偵測到未行使選舉權數的確認 modal，點擊下一步略過")
+                    _modal_next = "//div[@class='modal']//button[contains(.,'下一步')]"
+                    if self._retry_click(_modal_next):
+                        logger.info("✓ 已點擊 modal 的下一步")
+                        self._wait_page_ready()
                 return True
             else:
-                logger.warning("無法點擊下一步，等待用戶手動操作...")
-                input("\n⏳ 請手動點擊下一步，然後按 Enter 繼續...\n")
+                logger.warning("下一步按鈕未出現或點擊失敗")
                 return True
 
         except Exception as e:
