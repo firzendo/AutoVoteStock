@@ -110,8 +110,10 @@ def main():
         
         # 建立實體
         page_navigator = PageNavigator(driver)
-        screenshot_handler = ScreenshotHandler(driver, page_navigator, screenshot_dir="screenshots")
-        vote_handler = VoteHandler(driver, page_navigator, screenshot_handler, screenshot_dir="screenshots")
+        id_number = os.getenv('ID_NUMBER', 'default').strip()
+        screenshot_dir = os.path.join("screenshots", id_number)
+        screenshot_handler = ScreenshotHandler(driver, page_navigator, screenshot_dir=screenshot_dir)
+        vote_handler = VoteHandler(driver, page_navigator, screenshot_handler, screenshot_dir=screenshot_dir)
         
         # 投票
         voting_stats = vote_handler.execute_voting_loop(log_msg)
@@ -126,7 +128,7 @@ def main():
             time.sleep(2)  # 截圖前讓頁面穩定（此處保留 sleep 因為截圖不需要等待特定元素）
             
             # 執行最終截圖流程
-            execute_final_screenshot(driver, voting_stats, log_msg, vote_handler, page_navigator, output_dir="screenshots")
+            execute_final_screenshot(driver, voting_stats, log_msg, vote_handler, page_navigator, output_dir=screenshot_dir)
 
         completed_successfully = True
 

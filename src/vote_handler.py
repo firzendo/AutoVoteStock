@@ -411,7 +411,56 @@ class VoteHandler:
         total_voted = 0
         total_failed = 0
         total_scanned = 0
-        
+        _recorded_codes: set = set()  # 已記錄到 companies_info 的代碼（避免重複）
+
+        def _record_all_companies_on_page():
+            """掃描當前頁所有公司列（含已投票），補錄尚未記錄的公司到 companies_info。"""
+            try:
+                rows = self.driver.find_elements(By.TAG_NAME, 'tr')
+                for row in rows[1:]:
+                    try:
+                        cols = row.find_elements(By.TAG_NAME, 'td')
+                        if len(cols) < 3:
+                            continue
+                        parts = cols[0].text.strip().split()
+                        if not parts or not parts[0].isdigit():
+                            continue
+                        code = parts[0]
+                        if code in _recorded_codes:
+                            continue
+                        name = " ".join(parts[1:]) if len(parts) > 1 else "未知"
+                        date_parts = cols[1].text.strip().split()
+                        meeting_date = date_parts[0] if date_parts else "-"
+                        vote_period = date_parts[1] if len(date_parts) > 1 else "-"
+                        vote_status_text = cols[2].text.strip() if len(cols) > 2 else ""
+                        if "已投票" in vote_status_text:
+                            status = "已投票"
+                        elif "未投票" in vote_status_text:
+                            status = "未投票"
+                        else:
+                            continue  # 非有效列
+                        egift_qualify = "-"
+                        receipt_date = "-"
+                        if len(cols) > 4:
+                            egift_lines = [l.strip() for l in cols[4].text.strip().splitlines() if l.strip()]
+                            if egift_lines:
+                                egift_qualify = egift_lines[0]
+                                receipt_date = egift_lines[1] if len(egift_lines) > 1 else "-"
+                        _recorded_codes.add(code)
+                        self.companies_info.append({
+                            'code': code,
+                            'name': name,
+                            'meeting_date': meeting_date,
+                            'vote_period': vote_period,
+                            'status': status,
+                            'egift_qualify': egift_qualify,
+                            'receipt_date': receipt_date
+                        })
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
         log_msg_func("ℹ️  開始掃描未投票公司...")
         
         # 先返回第一頁，確保從頭開始掃描
@@ -426,6 +475,9 @@ class VoteHandler:
             # 重新掃描未投票的公司（使用 PageNavigator）
             unvoted_companies = self.page_navigator.find_all_unvoted_companies()
             logger.debug("掃描到 %d 家未投票公司", len(unvoted_companies))
+            
+            # 同時記錄頁面上所有公司（含已投票的舊資料）
+            _record_all_companies_on_page()
             
             if not unvoted_companies:
                 # 記錄當前 URL，若已訪問過則代表已循環一圈，可退出
@@ -456,25 +508,41 @@ class VoteHandler:
             company_row = unvoted_companies[0]
             
             try:
-                # 重新獲取公司代碼和名稱（避免使用陳舊的元素引用）
-                code_elem = company_row.find_element(By.XPATH, './/td[1]')
-                first_col_text = code_elem.text.strip()
+                # 重新獲取公司完整資訊（避免使用陳舊的元素引用）
+                cols = company_row.find_elements(By.TAG_NAME, 'td')
+                if not cols:
+                    total_failed += 1
+                    self.companies_info.append({'code': '未知', 'name': '未知', 'status': '投票失敗'})
+                    continue
                 
-                # 解析代碼和名稱 (格式: "2102 泰豐" 或類似)
+                # col[0]: 證券代號 + 公司簡稱
+                first_col_text = cols[0].text.strip()
                 parts = first_col_text.split()
                 company_code = parts[0] if parts else ""
                 company_name = " ".join(parts[1:]) if len(parts) > 1 else "未知"
+                
+                # col[1]: 會議日期 + 投票起訖日
+                date_col = cols[1].text.strip() if len(cols) > 1 else ""
+                date_parts = date_col.split()
+                meeting_date = date_parts[0] if date_parts else "-"
+                vote_period = date_parts[1] if len(date_parts) > 1 else "-"
+                
+                # col[4]: 符合eGift資格 + 開始領取日
+                egift_qualify = "-"
+                receipt_date = "-"
+                if len(cols) > 4:
+                    egift_col = cols[4].text.strip()
+                    egift_lines = [l.strip() for l in egift_col.splitlines() if l.strip()]
+                    if egift_lines:
+                        egift_qualify = egift_lines[0]
+                        receipt_date = egift_lines[1] if len(egift_lines) > 1 else "-"
                 
                 log_msg_func(f"\n═══ 公司 [{total_voted + total_failed + 1}] {company_name} ({company_code}) ═══")
             
             except Exception as e:
                 log_msg_func(f"⚠️  無法取得公司信息: {str(e)[:50]}")
                 total_failed += 1
-                self.companies_info.append({
-                    'code': '未知',
-                    'name': '未知',
-                    'status': '投票失敗'
-                })
+                self.companies_info.append({'code': '未知', 'name': '未知', 'status': '投票失敗'})
                 continue
             
             # 在當前公司行中查找和點擊投票按鈕
@@ -529,11 +597,23 @@ class VoteHandler:
                     
                     log_msg_func("✓ 投票完成，準備掃描下一個公司...")
                     total_voted += 1
-                    self.companies_info.append({
-                        'code': company_code,
-                        'name': company_name,
-                        'status': '已投票'
-                    })
+                    # 若已被 _record_all_companies_on_page 記錄為「未投票」，更新狀態
+                    for rec in self.companies_info:
+                        if rec['code'] == company_code:
+                            rec['status'] = '已投票'
+                            break
+                    else:
+                        # 若尚未記錄（不應發生，作為保險）
+                        _recorded_codes.add(company_code)
+                        self.companies_info.append({
+                            'code': company_code,
+                            'name': company_name,
+                            'meeting_date': meeting_date,
+                            'vote_period': vote_period,
+                            'status': '已投票',
+                            'egift_qualify': egift_qualify,
+                            'receipt_date': receipt_date
+                        })
                 
                 except Exception as e:
                     log_msg_func(f"❌ 提交或確認失敗: {str(e)[:60]}")
@@ -542,7 +622,11 @@ class VoteHandler:
                     self.companies_info.append({
                         'code': company_code,
                         'name': company_name,
-                        'status': '投票失敗'
+                        'meeting_date': meeting_date,
+                        'vote_period': vote_period,
+                        'status': '投票失敗',
+                        'egift_qualify': egift_qualify,
+                        'receipt_date': receipt_date
                     })
                     # 嘗試返回列表
                     try:
@@ -557,7 +641,11 @@ class VoteHandler:
                 self.companies_info.append({
                     'code': company_code,
                     'name': company_name,
-                    'status': '投票失敗'
+                    'meeting_date': meeting_date,
+                    'vote_period': vote_period,
+                    'status': '投票失敗',
+                    'egift_qualify': egift_qualify,
+                    'receipt_date': receipt_date
                 })
             
             # 防止無限迴圈：如果掃描次數太多仍有未投票公司，可能是頁面問題

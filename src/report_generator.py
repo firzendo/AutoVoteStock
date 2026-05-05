@@ -134,27 +134,17 @@ class ReportGenerator:
         report_file = os.path.join(self.output_dir, f"{timestamp}_執行結果.txt")
 
         try:
-            # 以本次投票記錄建立快速查詢表（code → status）
-            voted_this_run = {
-                c['code']: c['status']
-                for c in companies_info
-                if c.get('code') and c['code'] != '未知'
-            }
-
-            # 從頁面掃描完整名單
-            all_companies = self._scan_all_companies_from_page(log_msg_func)
-
-            # 若頁面掃描失敗（空），退而使用 companies_info
-            if not all_companies:
-                log_msg_func("⚠️  頁面掃描結果為空，改用本次投票記錄")
-                all_companies = [
-                    {
-                        'code': c.get('code', '-'),
-                        'name': c.get('name', '-'),
-                        'vote_status': c.get('status', '-'),
-                    }
-                    for c in companies_info
-                ]
+            # 優先使用本次投票記錄（已在投票時記錄完整資訊，避免重新掃頁面）
+            if companies_info:
+                log_msg_func("ℹ️  使用本次投票紀錄生成報告")
+                all_companies = companies_info
+            else:
+                # 降級方案：若無投票記錄則嘗試從頁面掃描
+                log_msg_func("⚠️  無本次投票紀錄，嘗試掃描頁面...")
+                all_companies = self._scan_all_companies_from_page(log_msg_func)
+                if not all_companies:
+                    log_msg_func("ℹ️  頁面掃描結果為空，報告無內容")
+                    return
 
             with open(report_file, 'w', encoding='utf-8') as f:
                 headers = [
@@ -174,19 +164,16 @@ class ReportGenerator:
                     code = company.get('code', '-')
                     name = company.get('name', '-')
 
-                    # 投票狀況：優先用頁面顯示，若為未知則補充本次記錄
-                    page_status = company.get('vote_status', '-')
-                    run_status  = voted_this_run.get(code, '')
-                    if page_status == '已投票':
+                    # 投票狀況：優先用 status 欄位（已在投票時記錄），若無則用 vote_status（頁面掃描結果）
+                    status = company.get('status') or company.get('vote_status', '-')
+                    if status == '已投票':
                         vote_status = "✓ 已投票"
-                    elif run_status == '已投票':
-                        vote_status = "✓ 已投票"
-                    elif run_status == '投票失敗':
+                    elif status == '投票失敗':
                         vote_status = "✗ 失敗"
-                    elif page_status == '未投票':
+                    elif status == '未投票':
                         vote_status = "✗ 未投票"
                     else:
-                        vote_status = page_status if page_status != '-' else "-"
+                        vote_status = "✓ 已投票" if status and '投票' not in str(status) else status
 
                     if code in egift_skipped:
                         is_screenshotted = "eGift"

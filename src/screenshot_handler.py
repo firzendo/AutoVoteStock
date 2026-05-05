@@ -19,6 +19,9 @@ class ScreenshotHandler:
     def __init__(self, driver: webdriver.Chrome, page_navigator: PageNavigator = None, screenshot_dir: str = "screenshots"):
         self.driver = driver
         self.screenshot_dir = screenshot_dir
+        # 確保截圖目錄存在
+        if not os.path.exists(self.screenshot_dir):
+            os.makedirs(self.screenshot_dir)
         self.screenshotted_companies = self._load_screenshotted_from_disk()
         self.egift_skipped_companies: set = set()  # 因符合eGift資格而略過截圖的公司代碼
         self.manual_skip_companies: set = self._load_skip_list_from_env()  # .env 手動截圖跳過名單
