@@ -31,7 +31,8 @@ load_dotenv()
 
 
 # --- 1. 初始化 Log 系統 ---
-LOG_DIR = "log"
+_id_number = os.getenv('ID_NUMBER', 'default').strip()
+LOG_DIR = os.path.join("log", _id_number)
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
 
@@ -144,7 +145,7 @@ def main():
             try:
                 log_msg("\n【報告生成】生成投票結果統計...")
                 log_msg(f"ℹ️  共收集 {len(vote_handler.companies_info)} 家公司信息")
-                report_gen = ReportGenerator(driver, page_navigator, output_dir="output")
+                report_gen = ReportGenerator(driver, page_navigator, output_dir=os.path.join("output", id_number))
                 report_gen.generate_voting_report(
                     vote_handler.companies_info,
                     vote_handler.screenshot_handler.screenshotted_companies,
