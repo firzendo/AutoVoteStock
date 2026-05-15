@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
+import re
 import logging
 import time
 from selenium import webdriver
@@ -71,7 +72,7 @@ class PageNavigator:
                                 time.sleep(3)
                                 self._logger.info("✓ 已使用 JavaScript 返回第一頁")
                                 return True
-                            except:
+                            except Exception:
                                 continue
                     
                     except Exception:
@@ -86,7 +87,6 @@ class PageNavigator:
     def _get_page_info(self) -> tuple:
         """解析頁面的「頁次：X/Y」文字，回傳 (current_page, total_pages)。
         無法解析時回傳 (0, 0)。"""
-        import re
         try:
             body_text = self.driver.find_element(By.TAG_NAME, 'body').text
             m = re.search(r'頁次[：:]\s*(\d+)\s*/\s*(\d+)', body_text)

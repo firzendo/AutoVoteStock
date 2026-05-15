@@ -2,6 +2,7 @@
 # coding: utf-8
 import os
 import io
+import re
 import time
 import datetime
 
@@ -52,8 +53,11 @@ def create_company_screenshot_callback(driver, log_msg_func, page_navigator, out
                 log_msg_func(f"   ✓ 已有截圖: {fname}，跳過")
                 return
 
+        # 清理公司名稱中的不符合字符（Windows 不允許: < > : " / \ | ? *）
+        safe_name = re.sub(r'[<>:"/\\|?*]', '', company_name)
+        
         timestamp = datetime.datetime.now().strftime("%Y%m%d")
-        filename = os.path.join(output_dir, f"{timestamp}_{company_name}_{company_code}.png")
+        filename = os.path.join(output_dir, f"{timestamp}_{safe_name}_{company_code}.png")
 
         try:
             # 使用 PageNavigator 滾回頁面頂部

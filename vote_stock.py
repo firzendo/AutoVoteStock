@@ -31,8 +31,8 @@ load_dotenv()
 
 
 # --- 1. 初始化 Log 系統 ---
-_id_number = os.getenv('ID_NUMBER', 'default').strip()
-LOG_DIR = os.path.join("log", _id_number)
+_folder_name = os.getenv('Name', os.getenv('ID_NUMBER', 'default')).strip()
+LOG_DIR = os.path.join("log", _folder_name)
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
 
@@ -111,8 +111,8 @@ def main():
         
         # 建立實體
         page_navigator = PageNavigator(driver)
-        id_number = os.getenv('ID_NUMBER', 'default').strip()
-        screenshot_dir = os.path.join("screenshots", id_number)
+        folder_name = os.getenv('Name', os.getenv('ID_NUMBER', 'default')).strip()
+        screenshot_dir = os.path.join("screenshots", folder_name)
         screenshot_handler = ScreenshotHandler(driver, page_navigator, screenshot_dir=screenshot_dir)
         vote_handler = VoteHandler(driver, page_navigator, screenshot_handler, screenshot_dir=screenshot_dir)
         
@@ -137,7 +137,7 @@ def main():
         log_msg(f"❌ 程式錯誤: {str(e)}")
         import traceback
         log_msg(traceback.format_exc())
-        input("\n⛔ 發生錯誤，程式已暫停（網頁維持現狀）\n   確認後按 Enter 鍵關閉瀏覽器...")
+        log_msg("\n⛔ 發生錯誤，程式已中斷（網頁維持現狀）")
 
     finally:
         # 生成執行結果報告
@@ -145,7 +145,7 @@ def main():
             try:
                 log_msg("\n【報告生成】生成投票結果統計...")
                 log_msg(f"ℹ️  共收集 {len(vote_handler.companies_info)} 家公司信息")
-                report_gen = ReportGenerator(driver, page_navigator, output_dir=os.path.join("output", id_number))
+                report_gen = ReportGenerator(driver, page_navigator, output_dir=os.path.join("output", folder_name))
                 report_gen.generate_voting_report(
                     vote_handler.companies_info,
                     vote_handler.screenshot_handler.screenshotted_companies,
@@ -163,7 +163,7 @@ def main():
             log_msg("\n【步驟3】執行登出...")
             login_handler.logout(log_msg)
 
-        if driver:
+        if driver and completed_successfully:
             driver.quit()
             log_msg("✓ 已關閉瀏覽器")
 

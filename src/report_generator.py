@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 import os
+import time
 import datetime
 import logging
 import unicodedata
@@ -104,7 +105,6 @@ class ReportGenerator:
                     continue
 
             if self.page_navigator.go_to_next_page():
-                import time
                 time.sleep(1)
                 continue
             else:
@@ -130,8 +130,19 @@ class ReportGenerator:
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 
-        timestamp = datetime.datetime.now().strftime("%Y%m%d")
-        report_file = os.path.join(self.output_dir, f"{timestamp}_執行結果.txt")
+        year = datetime.datetime.now().strftime("%Y")
+        report_file = os.path.join(self.output_dir, f"{year}_執行結果.txt")
+
+        headers = [
+            "證券代號",
+            "公司簡稱",
+            "會議日期",
+            "投票起訖日",
+            "投票狀況",
+            "已截圖",
+            "符合eGift發放資格",
+            "開始領取日"
+        ]
 
         try:
             # 優先使用本次投票記錄（已在投票時記錄完整資訊，避免重新掃頁面）
@@ -146,66 +157,85 @@ class ReportGenerator:
                     log_msg_func("ℹ️  頁面掃描結果為空，報告無內容")
                     return
 
-            with open(report_file, 'w', encoding='utf-8') as f:
-                headers = [
-                    "證券代號",
-                    "公司簡稱",
-                    "會議日期",
-                    "投票起訖日",
-                    "投票狀況",
-                    "已截圖",
-                    "符合eGift發放資格",
-                    "開始領取日"
+            # 建立本次新資料字典 {code: formatted_line}
+            new_rows = {}
+            for company in all_companies:
+                code = company.get('code', '-')
+                name = company.get('name', '-')
+
+                # 投票狀況：優先用 status 欄位（已在投票時記錄），若無則用 vote_status（頁面掃描結果）
+                status = company.get('status') or company.get('vote_status', '-')
+                if status == '已投票':
+                    vote_status = "✓ 已投票"
+                elif status == '投票失敗':
+                    vote_status = "✗ 失敗"
+                elif status == '未投票':
+                    vote_status = "✗ 未投票"
+                else:
+                    vote_status = "✓ 已投票" if status and '投票' not in str(status) else status
+
+                if code in egift_skipped:
+                    is_screenshotted = "eGift"
+                elif code in manual_skipped:
+                    is_screenshotted = "跳過"
+                elif code in screenshotted_companies:
+                    is_screenshotted = "✓"
+                else:
+                    is_screenshotted = "-"
+
+                row = [
+                    code,
+                    name,
+                    company.get('meeting_date', '-'),
+                    company.get('vote_period', '-'),
+                    vote_status,
+                    is_screenshotted,
+                    company.get('egift_qualify', '-'),
+                    company.get('receipt_date', '-'),
                 ]
-                f.write(_fmt_row(headers) + "\n")
-                f.write("-" * 100 + "\n")
+                new_rows[code] = _fmt_row(row)
 
-                for company in all_companies:
-                    code = company.get('code', '-')
-                    name = company.get('name', '-')
+            # 若檔案已存在，讀取現有內容並合併
+            if os.path.exists(report_file):
+                with open(report_file, 'r', encoding='utf-8') as f:
+                    existing_lines = f.readlines()
 
-                    # 投票狀況：優先用 status 欄位（已在投票時記錄），若無則用 vote_status（頁面掃描結果）
-                    status = company.get('status') or company.get('vote_status', '-')
-                    if status == '已投票':
-                        vote_status = "✓ 已投票"
-                    elif status == '投票失敗':
-                        vote_status = "✗ 失敗"
-                    elif status == '未投票':
-                        vote_status = "✗ 未投票"
-                    else:
-                        vote_status = "✓ 已投票" if status and '投票' not in str(status) else status
+                # 解析現有資料行（跳過表頭與分隔線）
+                existing_data = {}   # code -> formatted_line
+                existing_order = []  # 保持原始順序
+                for line in existing_lines[2:]:
+                    stripped = line.rstrip('\n')
+                    if not stripped:
+                        continue
+                    parts = stripped.split()
+                    if parts and parts[0].isdigit():
+                        code = parts[0]
+                        existing_data[code] = stripped
+                        if code not in existing_order:
+                            existing_order.append(code)
 
-                    if code in egift_skipped:
-                        is_screenshotted = "eGift"
-                    elif code in manual_skipped:
-                        is_screenshotted = "跳過"
-                    elif code in screenshotted_companies:
-                        is_screenshotted = "✓"
-                    else:
-                        is_screenshotted = "-"
+                # 合併：相同代號覆蓋，新代號附加在後
+                for code, row_line in new_rows.items():
+                    existing_data[code] = row_line
+                    if code not in existing_order:
+                        existing_order.append(code)
 
-                    row = [
-                        code,
-                        name,
-                        company.get('meeting_date', '-'),
-                        company.get('vote_period', '-'),
-                        vote_status,
-                        is_screenshotted,
-                        company.get('egift_qualify', '-'),
-                        company.get('receipt_date', '-'),
-                    ]
-                    f.write(_fmt_row(row) + "\n")
-
-            log_msg_func(f"✓ 報告已生成: {report_file}")
-            logger.info("報告文件: %s", report_file)
-
-        except Exception as e:
-            log_msg_func(f"⚠️  報告生成失敗: {str(e)}")
-            logger.error("報告生成失敗: %s", e)
+                with open(report_file, 'w', encoding='utf-8') as f:
+                    f.write(_fmt_row(headers) + "\n")
+                    f.write("-" * 100 + "\n")
+                    for code in existing_order:
+                        f.write(existing_data[code] + "\n")
+            else:
+                # 新建檔案
+                with open(report_file, 'w', encoding='utf-8') as f:
+                    f.write(_fmt_row(headers) + "\n")
+                    f.write("-" * 100 + "\n")
+                    for row_line in new_rows.values():
+                        f.write(row_line + "\n")
 
             log_msg_func(f"✓ 報告已生成: {report_file}")
             logger.info("報告文件: %s", report_file)
-            
+
         except Exception as e:
             log_msg_func(f"⚠️  報告生成失敗: {str(e)}")
             logger.error("報告生成失敗: %s", e)

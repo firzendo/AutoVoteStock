@@ -93,6 +93,19 @@ class VoteHandler:
                 time.sleep(0.5)
         return False
 
+    def _dismiss_msg_dialog(self) -> bool:
+        """若出現 msgDialog 提示框，點擊確認按鈕關閉。回傳 True 表示有處理到。"""
+        try:
+            btn = self.driver.find_elements(By.ID, "msgDialog_okBtn")
+            if btn and btn[0].is_displayed():
+                logger.info("⚠️  偵測到 msgDialog 提示框，點擊確認關閉")
+                btn[0].click()
+                time.sleep(0.5)
+                return True
+        except Exception:
+            pass
+        return False
+
     def _wait_page_ready(self, timeout: int = 10) -> None:
         """等待頁面 body 出現（輕量頁面就緒判斷）"""
         try:
@@ -216,7 +229,10 @@ class VoteHandler:
                     logger.info("✓ %s", msg)
             except Exception as e:
                 logger.warning("無法自動點擊全部贊成: %s", str(e)[:50])
-                input("\n按 Enter 鍵繼續...\n")
+                try:
+                    input("\n按 Enter 鍵繼續...\n")
+                except EOFError:
+                    logger.warning("⚠️  無互動終端，自動繼續")
 
             # 用 _retry_click 點「下一步」（單一動作細粒度 retry，不重跑整個 workflow）
             # self.screenshot_handler.capture("before_next_step")
@@ -229,7 +245,10 @@ class VoteHandler:
                 logger.warning("無法自動點擊下一步")
                 if "完成" in page_text or "提交成功" in page_text:
                     return {'total': 1, 'voted': 1, 'failed': 0}
-                input("\n按 Enter 鍵繼續...\n")
+                try:
+                    input("\n按 Enter 鍵繼續...\n")
+                except EOFError:
+                    logger.warning("⚠️  無互動終端，自動繼續")
                 return None
 
         return None   # 無動作，讓迴圈繼續偵測
@@ -284,6 +303,7 @@ class VoteHandler:
             while iteration < max_iter:
                 iteration += 1
                 self._wait_page_ready(timeout=5)
+                self._dismiss_msg_dialog()
                 page_text = self.driver.find_element(By.TAG_NAME, 'body').text
 
                 logger.info("【投票流程 - 循環 %d】(state檢測中...)", iteration)
@@ -389,6 +409,28 @@ class VoteHandler:
             logger.error("投票失敗 (代碼:105): %s", str(e))
             return False
     
+    def _vote_item_fallback(self, item) -> bool:
+        """備用投票：先試 page_navigator.click_all_agree，再逐一點擊 item 內可見元素"""
+        try:
+            code, msg = self.page_navigator.click_all_agree()
+            if code == 0:
+                logger.info("✓ 備用方法（click_all_agree）: %s", msg)
+                return True
+        except Exception as e:
+            logger.warning("備用方法 click_all_agree 失敗: %s", str(e)[:50])
+
+        try:
+            for tag in ('input', 'button', 'a'):
+                for el in item.find_elements(By.TAG_NAME, tag):
+                    if el.is_displayed():
+                        self.driver.execute_script("arguments[0].click();", el)
+                        logger.info("✓ 備用方法：已點擊 item 內 <%s>", tag)
+                        return True
+        except Exception as e:
+            logger.warning("備用方法 item click 失敗: %s", str(e)[:50])
+
+        return False
+
     def _go_back_to_list(self):
         success, msg = self.page_navigator.go_back_to_list()
         return (0 if success else -1, msg)
@@ -583,6 +625,7 @@ class VoteHandler:
                 try:
                     # self.screenshot_handler.capture(f"before_submit_{company_code}")
                     code, msg = self.page_navigator.submit_vote()
+                    self._dismiss_msg_dialog()
                     # 等待確認按鈕（取代 time.sleep(1)）
                     self._wait_clickable(
                         "//button[contains(.,'確認')] | //a[contains(.,'確認')]",

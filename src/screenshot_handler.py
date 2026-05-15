@@ -7,10 +7,7 @@ import datetime
 import logging
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from dotenv import load_dotenv
 from page_navigator import PageNavigator
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +56,7 @@ class ScreenshotHandler:
             if not os.path.exists(self.screenshot_dir):
                 os.makedirs(self.screenshot_dir)
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_id = error_id.replace(" ", "_")[:40] if error_id else "error"
+            safe_id = re.sub(r'[<>:"/\\|?*.\s]', '_', error_id)[:40] if error_id else "error"
             filename = f"ERROR_{ts}_{safe_id}.png"
             filepath = os.path.join(self.screenshot_dir, filename)
             self.driver.save_screenshot(filepath)

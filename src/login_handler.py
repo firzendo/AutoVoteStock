@@ -6,16 +6,12 @@
 """
 
 import os
-from dotenv import load_dotenv
 import logging
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support import expected_conditions as EC
 import time
-
-# 載入.env配置
-load_dotenv()
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +30,7 @@ class LoginHandler:
         self.id_number = os.getenv('ID_NUMBER', '')
         self.login_timeout = int(os.getenv('LOGIN_TIMEOUT', '30'))
         self.login_url = os.getenv('LOGIN_URL', '')
+        self.logout_url = os.getenv('LOGOUT_URL', 'https://stockservices.tdcc.com.tw/evote/logout.html')
         self.cert_type = os.getenv('CERT_TYPE', '券商網路')
     
     def _get_id_number(self):
@@ -75,7 +72,10 @@ class LoginHandler:
             logger.info("- 打開開發者工具 (F12)")
             logger.info("- 檢查身份證輸入框的屬性 (id, name, placeholder)")
             logger.info("- 或在下方輸入框找到元素說明")
-            input("🔔 請完成登入，然後按 Enter 鍵繼續...\n")
+            try:
+                input("🔔 請完成登入，然後按 Enter 鍵繼續...\n")
+            except EOFError:
+                logger.warning("⚠️  無互動終端，自動繼續登入流程")
             return (0, "手動登入完成")
         
         id_input = result
@@ -377,7 +377,7 @@ class LoginHandler:
             if not clicked:
                 # Fallback：直接導航到登出頁
                 _log("   ⚠️ 找不到登出按鈕，使用URL導航登出")
-                self.driver.get("https://stockservices.tdcc.com.tw/evote/logout.html")
+                self.driver.get(self.logout_url)
 
             time.sleep(1)
 
