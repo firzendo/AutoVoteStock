@@ -33,21 +33,26 @@ class ScreenshotHandler:
             logger.info("📋 截圖跳過名單（手動）: %s", ', '.join(sorted(codes)))
         return codes
     
-    def _load_screenshotted_from_disk(self) -> set:
-        """遞迴掃描 screenshot_dir 及所有子資料夾，載入已截圖的公司代碼。"""
-        codes = set()
+    def _load_screenshotted_from_disk(self) -> dict:
+        """遞迴掃描 screenshot_dir 及所有子資料夾，載入已截圖的公司代碼與截圖日期。
+        回傳 {code: date_str}，日期格式 YYYY/MM/DD；無法解析時為 '-'。"""
+        codes = {}
         if not os.path.exists(self.screenshot_dir):
             return codes
         for dirpath, _dirnames, filenames in os.walk(self.screenshot_dir):
             for fname in filenames:
                 if not fname.endswith('.png'):
                     continue
-                # 去掉 .png 後，從右邊找最後一個 '_' 後面的內容為代碼
                 fname_no_ext = fname[:-4]
                 last_idx = fname_no_ext.rfind('_')
                 if last_idx != -1:
                     code = fname_no_ext[last_idx + 1:]
-                    codes.add(code)
+                    date_str = '-'
+                    m = re.match(r'^(\d{8})_', fname_no_ext)
+                    if m:
+                        raw = m.group(1)
+                        date_str = f"{raw[:4]}/{raw[4:6]}/{raw[6:]}"
+                    codes[code] = date_str
         return codes
 
     def save_error_screenshot(self, error_id: str = "") -> str:
@@ -129,9 +134,9 @@ class ScreenshotHandler:
                         if company_code in self.manual_skip_companies:
                             logger.info("📋 %s (%s) 在手動跳過名單中，略過截圖", company_name, company_code)
                             log_msg_func(f"   📋 {company_name} ({company_code}) 在跳過名單中，略過截圖")
-                            self.screenshotted_companies.add(company_code)
+                            self.screenshotted_companies[company_code] = '-'
                             continue
-                        
+
                         # 檢查是否符合 eGift 發放資格（col[4]），符合者不需截圖
                         try:
                             egift_text = cols[4].text.strip() if len(cols) > 4 else ""
@@ -144,7 +149,7 @@ class ScreenshotHandler:
                                 log_msg_func(f"   ⏭️  {company_name} ({company_code}) 符合eGift資格，略過截圖")
                                 # 記錄到 egift_skipped，並標記為已處理避免重複掃描
                                 self.egift_skipped_companies.add(company_code)
-                                self.screenshotted_companies.add(company_code)
+                                self.screenshotted_companies[company_code] = '-'
                                 continue
                         except Exception:
                             pass
@@ -177,7 +182,7 @@ class ScreenshotHandler:
                         # 截圖
                         try:
                             screenshot_func(company_code, company_name)
-                            self.screenshotted_companies.add(company_code)
+                            self.screenshotted_companies[company_code] = datetime.datetime.now().strftime("%Y/%m/%d")
                             log_msg_func(f"   ✓ 截圖完成")
                         except Exception as e:
                             log_msg_func(f"   ⚠️  截圖失敗: {str(e)[:50]}")

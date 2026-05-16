@@ -10,7 +10,7 @@ from selenium.webdriver.common.by import By
 logger = logging.getLogger(__name__)
 
 # 欄位固定寬度（以半形字元為單位，中文佔 2）
-_COL_WIDTHS = [6, 12, 12, 22, 10, 6, 18, 12]
+_COL_WIDTHS = [6, 12, 12, 22, 10, 6, 12, 18, 12]
 
 
 def _display_width(text: str) -> int:
@@ -140,6 +140,7 @@ class ReportGenerator:
             "投票起訖日",
             "投票狀況",
             "已截圖",
+            "截圖日期",
             "符合eGift發放資格",
             "開始領取日"
         ]
@@ -183,6 +184,14 @@ class ReportGenerator:
                 else:
                     is_screenshotted = "-"
 
+                # 截圖日期：eGift/手動跳過無實際截圖，顯示 '-'
+                if code in egift_skipped or code in manual_skipped:
+                    screenshot_date = '-'
+                elif isinstance(screenshotted_companies, dict):
+                    screenshot_date = screenshotted_companies.get(code, '-')
+                else:
+                    screenshot_date = '-'
+
                 row = [
                     code,
                     name,
@@ -190,6 +199,7 @@ class ReportGenerator:
                     company.get('vote_period', '-'),
                     vote_status,
                     is_screenshotted,
+                    screenshot_date,
                     company.get('egift_qualify', '-'),
                     company.get('receipt_date', '-'),
                 ]

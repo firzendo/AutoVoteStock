@@ -504,45 +504,42 @@ class VoteHandler:
                 pass
 
         log_msg_func("ℹ️  開始掃描未投票公司...")
-        
-        # 先返回第一頁，確保從頭開始掃描
+
+        # ── 步驟1：確認在第一頁 ────────────────────────────────────────
         self.page_navigator.go_to_first_page()
         self._wait_page_ready(timeout=10)
-        
-        # 循環投票：每次投票完成後重新掃描，而非預先保存所有元素
-        # 原因：每次投票返回列表時頁面會刷新，預先保存的元素引用會變成陳舊(stale)
-        visited_empty_urls: set = set()  # 已確認無未投票公司的頁面 URL，用於偵測循環
-        
+
+        cur, tot = self.page_navigator._get_page_info()
+        if tot > 0:
+            log_msg_func(f"📄 確認頁次：{cur}/{tot}")
+            if cur != 1:
+                log_msg_func("⚠️  未在第一頁，重新返回第一頁...")
+                self.page_navigator.go_to_first_page()
+                self._wait_page_ready(timeout=10)
+                cur, tot = self.page_navigator._get_page_info()
+                log_msg_func(f"📄 目前頁次：{cur}/{tot}")
+        else:
+            log_msg_func("📄 已在投票列表頁面（開始掃描）")
+
+        # ── 步驟2：逐頁投票（每頁投完再翻頁）──────────────────────────
         while True:
-            # 重新掃描未投票的公司（使用 PageNavigator）
+            # 先記錄當前頁所有公司資訊（含已投票），再掃描未投票
+            _record_all_companies_on_page()
             unvoted_companies = self.page_navigator.find_all_unvoted_companies()
             logger.debug("掃描到 %d 家未投票公司", len(unvoted_companies))
-            
-            # 同時記錄頁面上所有公司（含已投票的舊資料）
-            _record_all_companies_on_page()
-            
+
             if not unvoted_companies:
-                # 記錄當前 URL，若已訪問過則代表已循環一圈，可退出
-                current_url = self.driver.current_url
-                if current_url in visited_empty_urls:
-                    log_msg_func("✓ 已遍歷所有頁面（無更多未投票公司），投票循環結束")
-                    break
-                visited_empty_urls.add(current_url)
-                
-                # 當前頁沒有未投票公司，嘗試翻到下一頁
-                log_msg_func("📄 當前頁無未投票公司，嘗試翻頁...")
-                
+                # 當前頁無未投票公司 → 嘗試翻到下一頁
+                cur, tot = self.page_navigator._get_page_info()
+                page_info = f"第 {cur}/{tot} 頁" if tot > 0 else "目前頁"
+                log_msg_func(f"📄 {page_info} 無未投票公司，嘗試翻頁...")
+
                 if self.page_navigator.go_to_next_page():
-                    # 成功翻頁，等待頁面就緒後繼續掃描（取代 time.sleep(2)）
                     self._wait_page_ready(timeout=10)
                     continue
                 else:
-                    # 無下一頁或翻頁失敗，投票循環完成
                     log_msg_func("✓ 已完成所有頁面投票，投票循環結束")
                     break
-            
-            # 找到未投票公司，重置已訪問記錄（投票後頁面狀態會改變）
-            visited_empty_urls.clear()
             
             total_scanned += 1
             
@@ -633,11 +630,12 @@ class VoteHandler:
                     
                     # 點擊確認按鈕就會自動返回投票列表
                     code, msg = self.page_navigator.click_query_button()
-                    # 等待列表頁面刷新
+                    # 等待列表頁面刷新完成（先等元素出現，再等頁面穩定）
                     self._wait_clickable(
                         "//*[contains(.,'未投票')] | //*[contains(.,'已投票')]",
                         timeout=10)
-                    
+                    self._wait_page_ready(timeout=5)
+
                     log_msg_func("✓ 投票完成，準備掃描下一個公司...")
                     total_voted += 1
                     # 若已被 _record_all_companies_on_page 記錄為「未投票」，更新狀態
@@ -700,6 +698,6 @@ class VoteHandler:
             'total': total_voted + total_failed,
             'voted': total_voted,
             'failed': total_failed,
-            'has_unvoted': bool(unvoted_companies) if total_scanned < 100 else False
+            'has_unvoted': False
         }
 
