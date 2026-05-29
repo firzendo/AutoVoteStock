@@ -29,7 +29,7 @@ def _pad(text: str, width: int) -> str:
 
 def _fmt_row(cells: list) -> str:
     parts = [_pad(str(c), _COL_WIDTHS[i]) for i, c in enumerate(cells)]
-    return "  ".join(parts).rstrip()
+    return ", ".join(parts).rstrip()
 
 
 class ReportGenerator:
