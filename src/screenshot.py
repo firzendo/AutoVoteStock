@@ -41,23 +41,28 @@ def create_company_screenshot_callback(driver, log_msg_func, page_navigator, out
     截圖範圍：從「貴股東對」開始，到「最近一次投票時間」結束
     
     Returns:
-        function: 接收 company_code 和 company_name 進行截圖的函數
+        function: 接收 company_code、company_name 和 meeting_date 進行截圖的函數
     """
-    def screenshot_callback(company_code, company_name):
+    def screenshot_callback(company_code, company_name, meeting_date=""):
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
-        # 檢查是否已有該公司代碼的截圖
+        # meeting_date 115/06/30 → meetdate_raw 1150630
+        meetdate_raw = meeting_date.replace('/', '')
+
+        # 新格式：YYYYMMDD_m{meetdate_raw}_{code}_{name}.png
+        # 重複偵測：找檔名含 _m{meetdate_raw}_{company_code}_ 的檔案
+        pattern = f"_m{meetdate_raw}_{company_code}_"
         for fname in os.listdir(output_dir):
-            if fname.endswith('.png') and f"_{company_code}.png" in fname:
+            if fname.endswith('.png') and pattern in fname:
                 log_msg_func(f"   ✓ 已有截圖: {fname}，跳過")
                 return
 
         # 清理公司名稱中的不符合字符（Windows 不允許: < > : " / \ | ? *）
         safe_name = re.sub(r'[<>:"/\\|?*]', '', company_name)
-        
+
         timestamp = datetime.datetime.now().strftime("%Y%m%d")
-        filename = os.path.join(output_dir, f"{timestamp}_{safe_name}_{company_code}.png")
+        filename = os.path.join(output_dir, f"{timestamp}_m{meetdate_raw}_{company_code}_{safe_name}.png")
 
         try:
             # 使用 PageNavigator 滾回頁面頂部

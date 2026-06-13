@@ -453,7 +453,7 @@ class VoteHandler:
         total_voted = 0
         total_failed = 0
         total_scanned = 0
-        _recorded_codes: set = set()  # 已記錄到 companies_info 的代碼（避免重複）
+        _recorded_keys: set = set()  # 已記錄到 companies_info 的 (code, meeting_date)（避免重複）
 
         def _record_all_companies_on_page():
             """掃描當前頁所有公司列（含已投票），補錄尚未記錄的公司到 companies_info。"""
@@ -468,12 +468,13 @@ class VoteHandler:
                         if not parts or not parts[0].isdigit():
                             continue
                         code = parts[0]
-                        if code in _recorded_codes:
+                        date_parts_tmp = cols[1].text.strip().split()
+                        meeting_date_tmp = date_parts_tmp[0] if date_parts_tmp else "-"
+                        if (code, meeting_date_tmp) in _recorded_keys:
                             continue
                         name = " ".join(parts[1:]) if len(parts) > 1 else "未知"
-                        date_parts = cols[1].text.strip().split()
-                        meeting_date = date_parts[0] if date_parts else "-"
-                        vote_period = date_parts[1] if len(date_parts) > 1 else "-"
+                        meeting_date = meeting_date_tmp  # 已在上方解析
+                        vote_period = date_parts_tmp[1] if len(date_parts_tmp) > 1 else "-"
                         vote_status_text = cols[2].text.strip() if len(cols) > 2 else ""
                         if "已投票" in vote_status_text:
                             status = "已投票"
@@ -488,7 +489,7 @@ class VoteHandler:
                             if egift_lines:
                                 egift_qualify = egift_lines[0]
                                 receipt_date = egift_lines[1] if len(egift_lines) > 1 else "-"
-                        _recorded_codes.add(code)
+                        _recorded_keys.add((code, meeting_date))
                         self.companies_info.append({
                             'code': code,
                             'name': name,

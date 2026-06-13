@@ -35,7 +35,8 @@ class ScreenshotHandler:
     
     def _load_screenshotted_from_disk(self) -> dict:
         """遞迴掃描 screenshot_dir 及所有子資料夾，載入已截圖的公司代碼與截圖日期。
-        回傳 {code: date_str}，日期格式 YYYY/MM/DD；無法解析時為 '-'。"""
+        回傳 {(code, meeting_date): date_str}；
+        新格式檔名：YYYYMMDD_m{7位民國日期}_code_name.png"""
         codes = {}
         if not os.path.exists(self.screenshot_dir):
             return codes
@@ -44,15 +45,16 @@ class ScreenshotHandler:
                 if not fname.endswith('.png'):
                     continue
                 fname_no_ext = fname[:-4]
-                last_idx = fname_no_ext.rfind('_')
-                if last_idx != -1:
-                    code = fname_no_ext[last_idx + 1:]
-                    date_str = '-'
-                    m = re.match(r'^(\d{8})_', fname_no_ext)
-                    if m:
-                        raw = m.group(1)
-                        date_str = f"{raw[:4]}/{raw[4:6]}/{raw[6:]}"
-                    codes[code] = date_str
+                # 新格式：YYYYMMDD_m{7digits}_{code}_{name}
+                m = re.match(r'^(\d{8})_m(\d{7})_([^_]+)_', fname_no_ext)
+                if not m:
+                    continue
+                raw_date = m.group(1)
+                roc = m.group(2)
+                code = m.group(3)
+                date_str = f"{raw_date[:4]}/{raw_date[4:6]}/{raw_date[6:]}"
+                meeting_date = f"{roc[:3]}/{roc[3:5]}/{roc[5:]}"
+                codes[(code, meeting_date)] = date_str
         return codes
 
     def save_error_screenshot(self, error_id: str = "") -> str:
@@ -125,8 +127,18 @@ class ScreenshotHandler:
                             company_code = "未知"
                             company_name = "未知"
                         
-                        # 已截圖過則跳過
-                        if company_code in self.screenshotted_companies:
+                        # 解析會議日期（第2欄），用於區分同一代碼的不同次會議
+                        try:
+                            date_col_text = cols[1].text.strip() if len(cols) > 1 else ""
+                            date_parts_col = date_col_text.split()
+                            company_meeting_date = date_parts_col[0] if date_parts_col else ""
+                        except Exception:
+                            company_meeting_date = ""
+                        
+                        screen_key = (company_code, company_meeting_date)
+                        
+                        # 已截圖過則跳過（以 (code, meeting_date) 為鍵）
+                        if screen_key in self.screenshotted_companies:
                             log_msg_func(f"   ℹ️  {company_name} ({company_code}) 已截圖，跳過")
                             continue
                         
@@ -134,7 +146,7 @@ class ScreenshotHandler:
                         if company_code in self.manual_skip_companies:
                             logger.info("📋 %s (%s) 在手動跳過名單中，略過截圖", company_name, company_code)
                             log_msg_func(f"   📋 {company_name} ({company_code}) 在跳過名單中，略過截圖")
-                            self.screenshotted_companies[company_code] = '-'
+                            self.screenshotted_companies[screen_key] = '-'
                             continue
 
                         # 檢查是否符合 eGift 發放資格（col[4]），符合者不需截圖
@@ -149,7 +161,7 @@ class ScreenshotHandler:
                                 log_msg_func(f"   ⏭️  {company_name} ({company_code}) 符合eGift資格，略過截圖")
                                 # 記錄到 egift_skipped，並標記為已處理避免重複掃描
                                 self.egift_skipped_companies.add(company_code)
-                                self.screenshotted_companies[company_code] = '-'
+                                self.screenshotted_companies[screen_key] = '-'
                                 continue
                         except Exception:
                             pass
@@ -181,8 +193,8 @@ class ScreenshotHandler:
                         
                         # 截圖
                         try:
-                            screenshot_func(company_code, company_name)
-                            self.screenshotted_companies[company_code] = datetime.datetime.now().strftime("%Y/%m/%d")
+                            screenshot_func(company_code, company_name, company_meeting_date)
+                            self.screenshotted_companies[screen_key] = datetime.datetime.now().strftime("%Y/%m/%d")
                             log_msg_func(f"   ✓ 截圖完成")
                         except Exception as e:
                             log_msg_func(f"   ⚠️  截圖失敗: {str(e)[:50]}")

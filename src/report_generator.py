@@ -158,11 +158,12 @@ class ReportGenerator:
                     log_msg_func("ℹ️  頁面掃描結果為空，報告無內容")
                     return
 
-            # 建立本次新資料字典 {code: formatted_line}
+            # 建立本次新資料字典 {(code, meeting_date): formatted_line}
             new_rows = {}
             for company in all_companies:
                 code = company.get('code', '-')
                 name = company.get('name', '-')
+                meeting_date_val = company.get('meeting_date', '-')
 
                 # 投票狀況：優先用 status 欄位（已在投票時記錄），若無則用 vote_status（頁面掃描結果）
                 status = company.get('status') or company.get('vote_status', '-')
@@ -175,11 +176,12 @@ class ReportGenerator:
                 else:
                     vote_status = "✓ 已投票" if status and '投票' not in str(status) else status
 
+                key = (code, meeting_date_val)
                 if code in egift_skipped:
                     is_screenshotted = "eGift"
                 elif code in manual_skipped:
                     is_screenshotted = "跳過"
-                elif code in screenshotted_companies:
+                elif isinstance(screenshotted_companies, dict) and key in screenshotted_companies:
                     is_screenshotted = "✓"
                 else:
                     is_screenshotted = "-"
@@ -188,14 +190,14 @@ class ReportGenerator:
                 if code in egift_skipped or code in manual_skipped:
                     screenshot_date = '-'
                 elif isinstance(screenshotted_companies, dict):
-                    screenshot_date = screenshotted_companies.get(code, '-')
+                    screenshot_date = screenshotted_companies.get(key, '-')
                 else:
                     screenshot_date = '-'
 
                 row = [
                     code,
                     name,
-                    company.get('meeting_date', '-'),
+                    meeting_date_val,
                     company.get('vote_period', '-'),
                     vote_status,
                     is_screenshotted,
@@ -203,7 +205,7 @@ class ReportGenerator:
                     company.get('egift_qualify', '-'),
                     company.get('receipt_date', '-'),
                 ]
-                new_rows[code] = _fmt_row(row)
+                new_rows[key] = _fmt_row(row)
 
             # 若檔案已存在，讀取現有內容並合併
             if os.path.exists(report_file):
@@ -211,30 +213,32 @@ class ReportGenerator:
                     existing_lines = f.readlines()
 
                 # 解析現有資料行（跳過表頭與分隔線）
-                existing_data = {}   # code -> formatted_line
+                existing_data = {}   # (code, meeting_date) -> formatted_line
                 existing_order = []  # 保持原始順序
                 for line in existing_lines[2:]:
                     stripped = line.rstrip('\n')
                     if not stripped:
                         continue
-                    parts = stripped.split()
-                    if parts and parts[0].isdigit():
-                        code = parts[0]
-                        existing_data[code] = stripped
-                        if code not in existing_order:
-                            existing_order.append(code)
+                    csv_parts = [p.strip() for p in stripped.split(',')]
+                    if csv_parts and csv_parts[0].isdigit():
+                        ex_code = csv_parts[0]
+                        ex_meeting = csv_parts[2] if len(csv_parts) > 2 else '-'
+                        ex_key = (ex_code, ex_meeting)
+                        existing_data[ex_key] = stripped
+                        if ex_key not in existing_order:
+                            existing_order.append(ex_key)
 
-                # 合併：相同代號覆蓋，新代號附加在後
-                for code, row_line in new_rows.items():
-                    existing_data[code] = row_line
-                    if code not in existing_order:
-                        existing_order.append(code)
+                # 合併：相同 (code, meeting_date) 覆蓋，新組合附加在後
+                for key, row_line in new_rows.items():
+                    existing_data[key] = row_line
+                    if key not in existing_order:
+                        existing_order.append(key)
 
                 with open(report_file, 'w', encoding='utf-8') as f:
                     f.write(_fmt_row(headers) + "\n")
                     f.write("-" * 100 + "\n")
-                    for code in existing_order:
-                        f.write(existing_data[code] + "\n")
+                    for key in existing_order:
+                        f.write(existing_data[key] + "\n")
             else:
                 # 新建檔案
                 with open(report_file, 'w', encoding='utf-8') as f:
